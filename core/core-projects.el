@@ -11,7 +11,8 @@ Emacs.")
   "If non-nil, non-projects are purged from the cache on `kill-emacs-hook'.")
 
 (defvar doom-projectile-fd-binary
-  (cl-find-if #'executable-find '("fd" "fdfind"))
+  (or (cl-find-if #'executable-find '("fdfind" "fd"))
+      "fd")
   "name of `fd-find' executable binary")
 
 (defvar doom-projectile-cache-timer-file (concat doom-cache-dir "projectile.timers")
@@ -21,82 +22,86 @@ Emacs.")
 ;;
 ;;; Packages
 
-(def-package! projectile
-  :after-call (after-find-file dired-before-readin-hook minibuffer-setup-hook)
+(use-package! projectile
+  :after-call after-find-file dired-before-readin-hook minibuffer-setup-hook
   :commands (projectile-project-root
              projectile-project-name
              projectile-project-p
-             projectile-add-known-project) ; TODO PR autoload upstream
+             projectile-locate-dominating-file)
   :init
   (setq projectile-cache-file (concat doom-cache-dir "projectile.cache")
-        projectile-enable-caching (not noninteractive)
-        projectile-known-projects-file (concat doom-cache-dir "projectile.projects")
-        projectile-require-project-root t
+        projectile-enable-caching doom-interactive-mode
+        projectile-files-cache-expire 86400 ; expire after a day
         projectile-globally-ignored-files '(".DS_Store" "Icon" "TAGS")
         projectile-globally-ignored-file-suffixes '(".elc" ".pyc" ".o")
-        projectile-ignored-projects '("~/" "/tmp")
         projectile-kill-buffers-filter 'kill-only-files
-        projectile-files-cache-expire 604800 ; expire after a week
-        projectile-sort-order 'recentf
-        projectile-use-git-grep t) ; use git-grep for text searches
+        projectile-known-projects-file (concat doom-cache-dir "projectile.projects")
+        projectile-ignored-projects '("~/" "/tmp"))
 
   (global-set-key [remap evil-jump-to-tag] #'projectile-find-tag)
   (global-set-key [remap find-tag]         #'projectile-find-tag)
 
   :config
-  (defun doom*projectile-cache-timers ()
-    "Persist `projectile-projects-cache-time' across sessions, so that
-`projectile-files-cache-expire' checks won't reset when restarting Emacs."
-    (projectile-serialize projectile-projects-cache-time doom-projectile-cache-timer-file))
-  (advice-add #'projectile-serialize-cache :before #'doom*projectile-cache-timers)
-  ;; Restore it
-  (setq projectile-projects-cache-time (projectile-unserialize doom-projectile-cache-timer-file))
-
-  (add-hook 'dired-before-readin-hook #'projectile-track-known-projects-find-file-hook)
   (projectile-mode +1)
 
-  ;; a more generic project root file
-  (push ".project" projectile-project-root-files-bottom-up)
+  ;; In the interest of performance, we reduce the number of project root marker
+  ;; files/directories projectile searches for when resolving the project root.
+  (setq projectile-project-root-files-bottom-up
+        (append '(".project"     ; doom project marker
+                  ".git")        ; Git VCS root dir
+                (when (executable-find "hg")
+                  '(".hg"))      ; Mercurial VCS root dir
+                (when (executable-find "fossil")
+                  '(".fslckout"  ; Fossil VCS root dir
+                    "_FOSSIL_")) ; Fossil VCS root DB on Windows
+                (when (executable-find "bzr")
+                  '(".bzr"))     ; Bazaar VCS root dir
+                (when (executable-find "darcs")
+                  '("_darcs")))  ; Darcs VCS root dir
+        ;; This will be filled by other modules. We build this list manually so
+        ;; projectile doesn't perform so many file checks every time it resolves
+        ;; a project's root -- particularly when a file has no project.
+        projectile-project-root-files '("TAGS")
+        projectile-project-root-files-top-down-recurring '(".svn" "Makefile"))
+
   (push (abbreviate-file-name doom-local-dir) projectile-globally-ignored-directories)
 
-  (defun doom*projectile-default-generic-command (orig-fn &rest args)
-    "If projectile can't tell what kind of project you're in, it issues an error
-when using many of projectile's command, e.g. `projectile-compile-command',
-`projectile-run-project', `projectile-test-project', and
-`projectile-configure-project', for instance.
+  ;; Disable commands that won't work, as is, and that Doom already provides a
+  ;; better alternative for.
+  (put 'projectile-ag 'disabled "Use +{ivy,helm}/project-search instead")
+  (put 'projectile-ripgrep 'disabled "Use +{ivy,helm}/project-search instead")
+  (put 'projectile-grep 'disabled "Use +{ivy,helm}/project-search instead")
 
-This suppresses the error so these commands will still run, but prompt you for
-the command instead."
-    (ignore-errors (apply orig-fn args)))
-  (advice-add #'projectile-default-generic-command :around #'doom*projectile-default-generic-command)
+  ;; Treat current directory in dired as a "file in a project" and track it
+  (add-hook 'dired-before-readin-hook #'projectile-track-known-projects-find-file-hook)
 
   ;; Accidentally indexing big directories like $HOME or / will massively bloat
   ;; projectile's cache (into the hundreds of MBs). This purges those entries
   ;; when exiting Emacs to prevent slowdowns/freezing when cache files are
   ;; loaded or written to.
-  (defun doom|cleanup-project-cache ()
-    "Purge projectile cache entries that:
+  (add-hook! 'kill-emacs-hook
+    (defun doom-cleanup-project-cache-h ()
+      "Purge projectile cache entries that:
 
 a) have too many files (see `doom-projectile-cache-limit'),
 b) represent blacklisted directories that are too big, change too often or are
    private. (see `doom-projectile-cache-blacklist'),
 c) are not valid projectile projects."
-    (when (bound-and-true-p projectile-projects-cache)
-      (cl-loop with blacklist = (mapcar #'file-truename doom-projectile-cache-blacklist)
-               for proot in (hash-table-keys projectile-projects-cache)
-               if (or (not (stringp proot))
-                      (>= (length (gethash proot projectile-projects-cache))
-                          doom-projectile-cache-limit)
-                      (member (substring proot 0 -1) blacklist)
-                      (and doom-projectile-cache-purge-non-projects
-                           (not (doom-project-p proot))))
-               do (doom-log "Removed %S from projectile cache" proot)
-               and do (remhash proot projectile-projects-cache)
-               and do (remhash proot projectile-projects-cache-time)
-               and do (remhash proot projectile-project-type-cache))
-      (projectile-serialize-cache)))
-  (unless noninteractive
-    (add-hook 'kill-emacs-hook #'doom|cleanup-project-cache))
+      (when (and (bound-and-true-p projectile-projects-cache)
+                 doom-interactive-mode)
+        (cl-loop with blacklist = (mapcar #'file-truename doom-projectile-cache-blacklist)
+                 for proot in (hash-table-keys projectile-projects-cache)
+                 if (or (not (stringp proot))
+                        (>= (length (gethash proot projectile-projects-cache))
+                            doom-projectile-cache-limit)
+                        (member (substring proot 0 -1) blacklist)
+                        (and doom-projectile-cache-purge-non-projects
+                             (not (doom-project-p proot))))
+                 do (doom-log "Removed %S from projectile cache" proot)
+                 and do (remhash proot projectile-projects-cache)
+                 and do (remhash proot projectile-projects-cache-time)
+                 and do (remhash proot projectile-project-type-cache))
+        (projectile-serialize-cache))))
 
   ;; It breaks projectile's project root resolution if HOME is a project (e.g.
   ;; it's a git repo). In that case, we disable bottom-up root searching to
@@ -105,31 +110,22 @@ c) are not valid projectile projects."
   (let ((default-directory "~"))
     (when (cl-find-if #'projectile-file-exists-p
                       projectile-project-root-files-bottom-up)
-      (message "HOME appears to be a project. Disabling bottom-up root search.")
+      (doom-log "HOME appears to be a project. Disabling bottom-up root search.")
       (setq projectile-project-root-files
             (append projectile-project-root-files-bottom-up
                     projectile-project-root-files)
             projectile-project-root-files-bottom-up nil)))
 
-  ;; Projectile root-searching functions can cause an infinite loop on TRAMP
-  ;; connections, so disable them.
-  ;; TODO Is this still necessary?
-  (defun doom*projectile-locate-dominating-file (orig-fn file name)
-    "Don't traverse the file system if on a remote connection."
-    (when (and (stringp file)
-               (not (file-remote-p file nil t)))
-      (funcall orig-fn file name)))
-  (advice-add #'projectile-locate-dominating-file :around #'doom*projectile-locate-dominating-file)
-
   (cond
    ;; If fd exists, use it for git and generic projects. fd is a rust program
    ;; that is significantly faster than git ls-files or find, and it respects
    ;; .gitignore. This is recommended in the projectile docs.
-   (doom-projectile-fd-binary
-    (setq projectile-git-command (concat
-                                  doom-projectile-fd-binary
-                                  " . --color=never --type f -0 -H -E .git")
-          projectile-generic-command projectile-git-command
+   ((executable-find doom-projectile-fd-binary)
+    (setq projectile-generic-command
+          (format "%s . --color=never --type f -0 -H -E .git"
+                  doom-projectile-fd-binary)
+          projectile-git-command projectile-generic-command
+          projectile-git-submodule-command nil
           ;; ensure Windows users get fd's benefits
           projectile-indexing-method 'alien))
 
@@ -139,14 +135,50 @@ c) are not valid projectile projects."
           (concat "rg -0 --files --color=never --hidden"
                   (cl-loop for dir in projectile-globally-ignored-directories
                            concat (format " --glob '!%s'" dir)))
+          projectile-git-command projectile-generic-command
+          projectile-git-submodule-command nil
           ;; ensure Windows users get rg's benefits
-          projectile-indexing-method 'alien)
-    ;; fix breakage on windows in git projects
-    (unless (executable-find "tr")
-      (setq projectile-git-submodule-command nil)))))
+          projectile-indexing-method 'alien))
+
+   ;; Fix breakage on windows in git projects with submodules, since Windows
+   ;; doesn't have tr
+   ((not (executable-find "tr"))
+    (setq projectile-git-submodule-command nil)))
+
+  (defadvice! doom--projectile-cache-timers-a ()
+    "Persist `projectile-projects-cache-time' across sessions, so that
+`projectile-files-cache-expire' checks won't reset when restarting Emacs."
+    :before #'projectile-serialize-cache
+    (projectile-serialize projectile-projects-cache-time doom-projectile-cache-timer-file))
+  ;; Restore it
+  (when (file-readable-p doom-projectile-cache-timer-file)
+    (setq projectile-projects-cache-time
+          (projectile-unserialize doom-projectile-cache-timer-file)))
+
+  (defadvice! doom--projectile-default-generic-command-a (orig-fn &rest args)
+    "If projectile can't tell what kind of project you're in, it issues an error
+when using many of projectile's command, e.g. `projectile-compile-command',
+`projectile-run-project', `projectile-test-project', and
+`projectile-configure-project', for instance.
+
+This suppresses the error so these commands will still run, but prompt you for
+the command instead."
+    :around #'projectile-default-generic-command
+    (ignore-errors (apply orig-fn args)))
+
+  ;; Projectile root-searching functions can cause an infinite loop on TRAMP
+  ;; connections, so disable them.
+  ;; TODO Is this still necessary?
+  (defadvice! doom--projectile-locate-dominating-file-a (orig-fn file name)
+    "Don't traverse the file system if on a remote connection."
+    :around #'projectile-locate-dominating-file
+    (when (and (stringp file)
+               (not (file-remote-p file nil t)))
+      (funcall orig-fn file name))))
+
 
 ;;
-;; Project-based minor modes
+;;; Project-based minor modes
 
 (defvar doom-project-hook nil
   "Hook run when a project is enabled. The name of the project's mode and its
@@ -197,30 +229,54 @@ should be activated. If they are *all* true, NAME is activated.
 Relevant: `doom-project-hook'."
   (declare (indent 1))
   (let ((init-var (intern (format "%s-init" name))))
-    `(progn
-       ,(if on-load `(defvar ,init-var nil))
-       (define-minor-mode ,name
-         "A project minor mode generated by `def-project-mode!'."
-         :init-value nil
-         :lighter ""
-         :keymap (make-sparse-keymap)
-         (if (not ,name)
-             ,on-exit
-           (run-hook-with-args 'doom-project-hook ',name ,name)
-           ,(when on-load
-              `(unless ,init-var
-                 ,on-load
-                 (setq ,init-var t)))
-           ,on-enter))
-       ,@(cl-loop for hook in add-hooks
-                  collect `(add-hook ',(intern (format "%s-hook" name))
-                                     #',hook))
-       ,(when (or modes match files when)
-          `(associate! ,name
-             :modes ,modes
-             :match ,match
-             :files ,files
-             :when ,when)))))
+    (macroexp-progn
+     (append
+      (when on-load
+        `((defvar ,init-var nil)))
+      `((define-minor-mode ,name
+          "A project minor mode generated by `def-project-mode!'."
+          :init-value nil
+          :lighter ""
+          :keymap (make-sparse-keymap)
+          (if (not ,name)
+              ,on-exit
+            (run-hook-with-args 'doom-project-hook ',name ,name)
+            ,(when on-load
+               `(unless ,init-var
+                  ,on-load
+                  (setq ,init-var t)))
+            ,on-enter))
+        (dolist (hook ,add-hooks)
+          (add-hook ',(intern (format "%s-hook" name)) hook)))
+      (cond ((or files modes when)
+             (cl-check-type files (or null list string))
+             (let ((fn
+                    `(lambda ()
+                       (and (not (bound-and-true-p ,name))
+                            (and buffer-file-name (not (file-remote-p buffer-file-name nil t)))
+                            ,(or (null match)
+                                 `(if buffer-file-name (string-match-p ,match buffer-file-name)))
+                            ,(or (null files)
+                                 ;; Wrap this in `eval' to prevent eager expansion
+                                 ;; of `project-file-exists-p!' from pulling in
+                                 ;; autoloaded files prematurely.
+                                 `(eval
+                                   '(project-file-exists-p!
+                                     ,(if (stringp (car files)) (cons 'and files) files))))
+                            ,(or when t)
+                            (,name 1)))))
+               (if modes
+                   `((dolist (mode ,modes)
+                       (let ((hook-name
+                              (intern (format "doom--enable-%s%s-h" ',name
+                                              (if (eq mode t) "" (format "-in-%s" mode))))))
+                         (fset hook-name #',fn)
+                         (if (eq mode t)
+                             (add-to-list 'auto-minor-mode-magic-alist (cons hook-name #',name))
+                           (add-hook (intern (format "%s-hook" mode)) hook-name)))))
+                 `((add-hook 'change-major-mode-after-body-hook #',fn)))))
+            (match
+             `((add-to-list 'auto-minor-mode-alist (cons ,match #',name)))))))))
 
 (provide 'core-projects)
 ;;; core-projects.el ends here

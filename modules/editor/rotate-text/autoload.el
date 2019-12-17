@@ -1,7 +1,7 @@
 ;;; editor/rotate-text/autoload.el -*- lexical-binding: t; -*-
 
 ;;;###autoload
-(after! rotate-text
+(with-eval-after-load 'rotate-text
   (add-to-list 'rotate-text-words '("true" "false")))
 
 ;;;###autodef
@@ -10,7 +10,7 @@
 `rotate-text' will cycle through."
   (declare (indent defun))
   (dolist (mode (doom-enlist modes))
-    (let ((fn-name (intern (format "+rotate-text|init-%s" mode))))
+    (let ((fn-name (intern (format "+rotate-text-init-%s-h" mode))))
       (fset fn-name
             (lambda ()
               (setq-local rotate-text-local-symbols symbols)

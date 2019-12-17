@@ -1,135 +1,131 @@
 ;;; core/cli/env.el -*- lexical-binding: t; -*-
 
-(dispatcher! env
-  (let ((env-file (abbreviate-file-name doom-env-file)))
-    (pcase (car args)
-      ((or "refresh" "re")
-       (doom-reload-env-file 'force))
-      ((or "enable" "auto")
-       (setenv "DOOMENV" "1")
-       (print! (green "Enabling auto-reload of %S") env-file)
-       (doom-reload-env-file 'force)
-       (print! (green "Done! `doom refresh' will now refresh your envvar file.")))
-      ("clear"
-       (setenv "DOOMENV" nil)
-       (unless (file-exists-p env-file)
-         (user-error "%S does not exist to be cleared" env-file))
-       (delete-file env-file)
-       (print! (green "Disabled envvar file by deleting %S") env-file))
-      (_
-       (print! "%s\n\n%s"
-               (bold (red "No valid subcommand provided."))
-               "See `doom help env` to see available commands."))))
-  "Manages your envvars file.
+(defcli! env
+  ((clear-p ["-c" "--clear"] "Clear and delete your envvar file")
+   (outputfile ["-o" PATH]
+    "Generate the envvar file at PATH. Note that envvar files that aren't in
+`doom-env-file' won't be loaded automatically at startup. You will need to
+load them manually from your private config with the `doom-load-envvars-file'
+function."))
+  "Creates or regenerates your envvars file.
 
-  env [SUBCOMMAND]
+The envvars file is created by scraping your (interactive) shell environment
+into newline-delimited KEY=VALUE pairs. Typically by running '$SHELL -ic env'
+(or '$SHELL -c set' on windows). Doom loads this file at startup (if it exists)
+to ensure Emacs mirrors your shell environment (particularly to ensure PATH and
+SHELL are correctly set).
 
-Available subcommands:
+This is useful in cases where you cannot guarantee that Emacs (or the daemon)
+will be launched from the correct environment (e.g. on MacOS or through certain
+app launchers on Linux).
 
-  refresh  Create or regenerate your envvar file
-  auto     enable auto-reloading of your envvars file (on `doom refresh`)
-  clear    deletes your envvar file (if it exists) and disables auto-reloading
+This file is automatically regenerated when you run this command or 'doom
+refresh'. However, 'doom refresh' will only regenerate this file if it exists.
 
-An envvars file (its location is controlled by the `doom-env-file' variable)
-will contain a list of environment variables scraped from your shell environment
-and loaded when Doom starts (if it exists). This is necessary when Emacs can't
-be launched from your shell environment (e.g. on MacOS or certain app launchers
-on Linux).
+Why this over exec-path-from-shell?
 
-To generate a file, run `doom env refresh`. If you'd like this file to be
-auto-reloaded when running `doom refresh`, run `doom env enable` instead (only
-needs to be run once).")
+  1. `exec-path-from-shell' spawns (at least) one process at startup to scrape
+     your shell environment. This can be arbitrarily slow depending on the
+     user's shell configuration. A single program (like pyenv or nvm) or config
+     framework (like oh-my-zsh) could undo all of Doom's startup optimizations
+     in one fell swoop.
+
+  2. `exec-path-from-shell' only scrapes some state from your shell. You have to
+     be proactive in order to get it to capture all the envvars relevant to your
+     development environment.
+
+     I'd rather it inherit your shell environment /correctly/ (and /completely/)
+     or not at all. It frontloads the debugging process rather than hiding it
+     until it you least want to deal with it."
+  (let ((env-file (expand-file-name (or outputfile doom-env-file))))
+    (cond (clear-p
+           (unless (file-exists-p env-file)
+             (user-error! "%S does not exist to be cleared"
+                          (path env-file)))
+           (delete-file env-file)
+           (print! (success "Successfully deleted %S")
+                   (path env-file)))
+
+          (args
+           (user-error "I don't understand 'doom env %s'"
+                       (string-join args " ")))
+
+          ((doom-cli-reload-env-file 'force env-file)))))
 
 
 ;;
 ;; Helpers
 
 (defvar doom-env-ignored-vars
-  '("^PWD$"
-    "^PS1$"
-    "^R?PROMPT$"
-    "^DBUS_SESSION_BUS_ADDRESS$"
+  '("^DBUS_SESSION_BUS_ADDRESS$"
     "^GPG_AGENT_INFO$"
+    "^GPG_TTY$"
+    "^HOME$"
+    "^PS1$"
+    "^PWD$"
+    "^R?PROMPT$"
     "^SSH_AGENT_PID$"
     "^SSH_AUTH_SOCK$"
+    "^TERM$"
     ;; Doom envvars
-    "^INSECURE$"
     "^DEBUG$"
-    "^YES$")
+    "^INSECURE$"
+    "^YES$"
+    "^__")
   "Environment variables to not save in `doom-env-file'.
 
 Each string is a regexp, matched against variable names to omit from
 `doom-env-file'.")
 
-(defvar doom-env-executable
-  (if IS-WINDOWS
-      "set"
-    (executable-find "env"))
-  "The program to use to scrape your shell environment with.
-It is rare that you'll need to change this.")
-
-(defvar doom-env-switches
-  (if IS-WINDOWS
-      "-c"
-    "-ic") ; Execute in an interactive shell
-  "The `shell-command-switch'es to use on `doom-env-executable'.
-This is a list of strings. Each entry is run separately and in sequence with
-`doom-env-executable' to scrape envvars from your shell environment.")
-
-;; Borrows heavily from Spacemacs' `spacemacs//init-spacemacs-env'.
-(defun doom-reload-env-file (&optional force-p)
+(defun doom-cli-reload-env-file (&optional force-p env-file)
   "Generates `doom-env-file', if it doesn't exist (or if FORCE-P).
 
 This scrapes the variables from your shell environment by running
 `doom-env-executable' through `shell-file-name' with `doom-env-switches'. By
 default, on Linux, this is '$SHELL -ic /usr/bin/env'. Variables in
 `doom-env-ignored-vars' are removed."
-  (when (or force-p (not (file-exists-p doom-env-file)))
-    (with-temp-file doom-env-file
-      (message "%s envvars file at %S"
-               (if (file-exists-p doom-env-file)
-                   "Regenerating"
-                 "Generating")
-               (abbreviate-file-name doom-env-file))
-      (let ((process-environment doom-site-process-environment))
-        (insert
-         (concat
-          "# -*- mode: dotenv -*-\n"
-          (format "# Generated with: %s %s %s\n"
-                  shell-file-name
-                  doom-env-switches
-                  doom-env-executable)
-          "# ---------------------------------------------------------------------------\n"
-          "# This file was auto-generated by `doom env refresh'. It contains a list of\n"
-          "# environment variables scraped from your default shell (excluding variables\n"
-          "# blacklisted in doom-env-ignored-vars).\n"
-          "#\n"
-          "# It is NOT safe to edit this file. Changes will be overwritten next time that\n"
-          "# `doom env refresh` is executed. Alternatively, create your own env file and\n"
-          "# load it with `(doom-load-env-vars FILE)`.\n"
-          "#\n"
-          "# To auto-regenerate this file when `doom reload` is run, use `doom env auto' or\n"
-          "# set DOOMENV=1 in your shell environment/config.\n"
-          "# ---------------------------------------------------------------------------\n\n"))
-        (let ((shell-command-switch doom-env-switches))
-          (message "Scraping env from '%s %s %s'"
-                   shell-file-name
-                   shell-command-switch
-                   doom-env-executable)
-          (save-excursion
-            (insert (shell-command-to-string doom-env-executable)))
-          ;; Remove undesireable variables
-          (while (re-search-forward "\n\\([^= \n]+\\)=" nil t)
-            (save-excursion
-              (let* ((valend (or (save-match-data
-                                   (when (re-search-forward "^\\([^= ]+\\)=" nil t)
-                                     (line-beginning-position)))
-                                 (point-max)))
-                     (var (match-string 1))
-                     (value (buffer-substring-no-properties (point) (1- valend))))
-                (when (cl-loop for regexp in doom-env-ignored-vars
-                               if (string-match-p regexp var)
-                               return t)
-                  (message "Ignoring %s" var)
-                  (delete-region (match-beginning 0) (1- valend))))))
-          (print! (green "Envvar successfully generated")))))))
+  (let ((env-file (if env-file
+                      (expand-file-name env-file)
+                    doom-env-file)))
+    (when (or force-p (not (file-exists-p env-file)))
+      (with-temp-file env-file
+        (print! (start "%s envvars file at %S")
+                (if (file-exists-p env-file)
+                    "Regenerating"
+                  "Generating")
+                (path env-file))
+        (let ((process-environment doom--initial-process-environment))
+          (print! (info "Scraping shell environment"))
+          (print-group!
+           (when doom-interactive-mode
+             (user-error "'doom env' must be run on the command line, not an interactive session"))
+           (goto-char (point-min))
+           (insert
+            (concat
+             "# -*- mode: dotenv -*-\n"
+             (format "# Generated from a %s shell environent\n" shell-file-name)
+             "# ---------------------------------------------------------------------------\n"
+             "# This file was auto-generated by `doom env'. It contains a list of environment\n"
+             "# variables scraped from your default shell (excluding variables blacklisted\n"
+             "# in doom-env-ignored-vars).\n"
+             "#\n"
+             (if (file-equal-p env-file doom-env-file)
+                 (concat "# It is NOT safe to edit this file. Changes will be overwritten next time you\n"
+                         "# run 'doom refresh'. To create a safe-to-edit envvar file use:\n#\n"
+                         "#   doom env -o ~/.doom.d/myenv\n#\n"
+                         "# And load it with (doom-load-envvars-file \"~/.doom.d/myenv\").\n")
+               (concat "# This file is safe to edit by hand, but needs to be loaded manually with:\n#\n"
+                       "#   (doom-load-envvars-file \"path/to/this/file\")\n#\n"
+                       "# Use 'doom env -o path/to/this/file' to regenerate it."))
+             "# ---------------------------------------------------------------------------\n\n"))
+           ;; We assume that this noninteractive session was spawned from the
+           ;; user's interactive shell, therefore we just dump
+           ;; `process-environment' to a file.
+           (dolist (env process-environment)
+             (if (cl-find-if (doom-rpartial #'string-match-p (car (split-string env "=")))
+                             doom-env-ignored-vars)
+                 (print! (info "Ignoring %s") env)
+               (insert env "\n")))
+           (print! (success "Successfully generated %S")
+                   (path env-file))
+           t))))))

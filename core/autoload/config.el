@@ -1,5 +1,12 @@
 ;;; core/autoload/config.el -*- lexical-binding: t; -*-
 
+(defvar doom-bin-dir (concat doom-emacs-dir "bin/"))
+(defvar doom-bin (concat doom-bin-dir "doom"))
+
+;;;###autoload
+(defvar doom-reload-hook nil
+  "A list of hooks to run when `doom/reload' is called.")
+
 ;;;###autoload
 (defvar doom-reloading-p nil
   "TODO")
@@ -19,7 +26,45 @@
   (doom-project-find-file doom-private-dir))
 
 ;;;###autoload
-(defun doom/reload (&optional force-p)
+(defun doom/goto-doomblock ()
+  "Open your private init.el and go to your `doom!' block."
+  (interactive)
+  (find-file (expand-file-name "init.el" doom-private-dir))
+  (goto-char
+   (or (save-excursion
+         (goto-char (point-min))
+         (search-forward "(doom!" nil t))
+       (point))))
+
+;;;###autoload
+(defun doom/goto-config-file ()
+  "Open your private config.el file."
+  (interactive)
+  (find-file (expand-file-name "config.el" doom-private-dir)))
+
+;;;###autoload
+(defun doom/goto-packages-file ()
+  "Open your private packages.el file."
+  (interactive)
+  (find-file (expand-file-name "packages.el" doom-private-dir)))
+
+
+;;
+;;; Managements
+
+(cl-defmacro doom--compile (command &key on-success on-failure)
+  (declare (indent defun))
+  `(with-current-buffer (compile ,command)
+     (add-hook
+      'compilation-finish-functions
+      (lambda (_buf status)
+        (if (equal status "finished\n")
+            ,on-success
+          ,on-failure))
+      nil 'local)))
+
+;;;###autoload
+(defun doom/reload ()
   "Reloads your private config.
 
 This is experimental! It will try to do as `bin/doom refresh' does, but from
@@ -27,69 +72,71 @@ within this Emacs session. i.e. it reload autoloads files (if necessary),
 reloads your package list, and lastly, reloads your private config.el.
 
 Runs `doom-reload-hook' afterwards."
-  (interactive "P")
+  (interactive)
   (require 'core-cli)
-  (general-auto-unbind-keys)
-  (let ((doom-reloading-p t))
-    (when (getenv "DOOMENV")
-      (doom-reload-env-file 'force))
-    (doom-reload-autoloads force-p)
-    (let (doom-init-p)
-      (doom-initialize))
-    (with-demoted-errors "PRIVATE CONFIG ERROR: %s"
-      (let (doom-init-modules-p)
-        (doom-initialize-modules)))
-    (when (bound-and-true-p doom-packages)
-      (doom/reload-packages))
-    (run-hook-wrapped 'doom-reload-hook #'doom-try-run-hook))
-  (general-auto-unbind-keys t)
-  (message "Finished!"))
+  (when (and IS-WINDOWS (file-exists-p doom-env-file))
+    (warn "Can't regenerate envvar file from within Emacs. Run 'doom env' from the console"))
+  (doom--compile (format "%s refresh -e" doom-bin)
+    :on-success
+    (let ((doom-reloading-p t))
+      (doom-initialize 'force)
+      (with-demoted-errors "PRIVATE CONFIG ERROR: %s"
+        (general-auto-unbind-keys)
+        (unwind-protect
+            (doom-initialize-modules 'force)
+          (general-auto-unbind-keys t)))
+      (run-hook-wrapped 'doom-reload-hook #'doom-try-run-hook)
+      (print! (success "Config successfully reloaded!")))
+    :on-failure
+    (user-error "Failed to reload your config")))
 
 ;;;###autoload
-(defun doom/reload-autoloads (&optional force-p)
+(defun doom/reload-autoloads ()
   "Reload only `doom-autoload-file' and `doom-package-autoload-file'.
 
 This is much faster and safer than `doom/reload', but not as comprehensive. This
-reloads your package and module visibility, but does not enable/disable It does
-not reload your private config.
+reloads your package and module visibility, but does not install new packages or
+remove orphaned ones. It also doesn't reload your private config.
 
 It is useful to only pull in changes performed by 'doom refresh' on the command
 line."
+  (interactive)
+  (require 'core-cli)
+  (require 'core-packages)
+  (doom-initialize-packages)
+  (doom-cli-reload-autoloads nil 'force))
+
+;;;###autoload
+(defun doom/reload-env (&optional arg)
+  "Regenerates and/or reloads your envvar file.
+
+If passed the prefix ARG, clear the envvar file. Uses the same mechanism as
+'bin/doom env'.
+
+An envvar file contains a snapshot of your shell environment, which can be
+imported into Emacs."
   (interactive "P")
-  (doom-initialize-autoloads doom-autoload-file)
-  (doom-initialize-autoloads doom-package-autoload-file))
+  (when IS-WINDOWS
+    (user-error "Cannot reload envvar file from within Emacs on Windows, run it from cmd.exe"))
+  (doom--compile
+    (format "%s -ic '%s env%s'"
+            (string-trim
+             (shell-command-to-string
+             (format "getent passwd %S | cut -d: -f7"
+                     (user-login-name))))
+            doom-bin (if arg " -c" ""))
+    :on-success
+    (let ((doom-reloading-p t))
+      (unless arg
+        (doom-load-envvars-file doom-env-file)))
+    :on-failure
+    (error "Failed to generate env file")))
 
 ;;;###autoload
-(defun doom/reload-env ()
-  "Regenerates and reloads your shell environment.
-
-Uses the same mechanism as 'bin/doom env reload'."
+(defun doom/upgrade ()
+  "Run 'doom upgrade' then prompt to restart Emacs."
   (interactive)
-  (compile (format "%s env refresh" (expand-file-name "bin/doom" doom-emacs-dir)))
-  (while compilation-in-progress
-    (sit-for 1))
-  (unless (file-readable-p doom-env-file)
-    (error "Failed to generate env file"))
-  (doom-load-env-vars doom-env-file))
-
-;;;###autoload
-(defun doom/reload-font ()
-  "Reload your fonts, if they're set.
-See `doom|init-fonts'."
-  (interactive)
-  (when doom-font
-    (set-frame-font doom-font t))
-  (doom|init-fonts)
-  (mapc #'doom|init-emoji-fonts (frame-list)))
-
-;;;###autoload
-(defun doom/reload-theme ()
-  "Reload the current color theme."
-  (interactive)
-  (let ((theme (or (car-safe custom-enabled-themes) doom-theme)))
-    (when theme
-      (mapc #'disable-theme custom-enabled-themes))
-    (when (and doom-theme (not (memq doom-theme custom-enabled-themes)))
-      (let (doom--prefer-theme-elc)
-        (load-theme doom-theme t)))
-    (doom|init-fonts)))
+  (doom--compile (format "%s upgrade" doom-bin)
+    :on-success
+    (when (y-or-n-p "You must restart Emacs for the upgrade to take effect.\n\nRestart Emacs?")
+      (doom/restart-and-restore))))

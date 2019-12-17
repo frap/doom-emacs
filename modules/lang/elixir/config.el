@@ -1,6 +1,13 @@
 ;;; lang/elixir/config.el -*- lexical-binding: t; -*-
 
-(def-package! elixir-mode
+(after! projectile
+  (add-to-list 'projectile-project-root-files "mix.exs"))
+
+
+;;
+;;; Packages
+
+(use-package! elixir-mode
   :defer t
   :init
   ;; Disable default smartparens config. There are too many pairs; we only want
@@ -21,37 +28,42 @@
     :return "return" :yield "use")
 
   ;; ...and only complete the basics
-  (after! smartparens
-    (sp-with-modes 'elixir-mode
-      (sp-local-pair "do" "end"
-                     :when '(("RET" "<evil-ret>"))
-                     :unless '(sp-in-comment-p sp-in-string-p)
-                     :post-handlers '("||\n[i]"))
-      (sp-local-pair "do " " end" :unless '(sp-in-comment-p sp-in-string-p))
-      (sp-local-pair "fn " " end" :unless '(sp-in-comment-p sp-in-string-p))))
+  (sp-with-modes 'elixir-mode
+    (sp-local-pair "do" "end"
+                   :when '(("RET" "<evil-ret>"))
+                   :unless '(sp-in-comment-p sp-in-string-p)
+                   :post-handlers '("||\n[i]"))
+    (sp-local-pair "do " " end" :unless '(sp-in-comment-p sp-in-string-p))
+    (sp-local-pair "fn " " end" :unless '(sp-in-comment-p sp-in-string-p)))
 
-  (def-package! alchemist-company
-    :when (featurep! :completion company)
-    :commands alchemist-company
-    :init
-    (set-company-backend! 'elixir-mode '(alchemist-company company-yasnippet))
-    :config
-    ;; Alchemist doesn't use hook symbols to add these backends, so we have to
-    ;; use the entire closure to get rid of it.
-    (let ((fn (byte-compile (lambda () (add-to-list (make-local-variable 'company-backends) 'alchemist-company)))))
-      (remove-hook 'alchemist-mode-hook fn)
-      (remove-hook 'alchemist-iex-mode-hook fn)))
+  (when (featurep! +lsp)
+    (add-hook 'elixir-mode-local-vars-hook #'lsp!))
 
-  (def-package! flycheck-credo
+  (use-package! flycheck-credo
     :when (featurep! :tools flycheck)
     :config (flycheck-credo-setup)))
 
 
-(def-package! alchemist
+(use-package! alchemist
   :hook (elixir-mode . alchemist-mode)
+  :init
+  (after! elixir-mode
+    (set-lookup-handlers! 'elixir-mode
+      :definition #'alchemist-goto-definition-at-point
+      :documentation #'alchemist-help-search-at-point)
+    (set-eval-handler! 'elixir-mode #'alchemist-eval-region)
+    (set-repl-handler! 'elixir-mode #'alchemist-iex-project-run)))
+
+
+(use-package! alchemist-company
+  :when (featurep! :completion company)
+  :commands alchemist-company
+  :init
+  (after! elixir-mode
+    (set-company-backend! 'elixir-mode '(alchemist-company company-yasnippet)))
   :config
-  (set-lookup-handlers! 'elixir-mode
-    :definition #'alchemist-goto-definition-at-point
-    :documentation #'alchemist-help-search-at-point)
-  (set-eval-handler! 'elixir-mode #'alchemist-eval-region)
-  (set-repl-handler! 'elixir-mode #'alchemist-iex-project-run))
+  ;; Alchemist doesn't use hook symbols to add these backends, so we have to use
+  ;; the entire closure to get rid of it.
+  (let ((fn (byte-compile (lambda () (add-to-list (make-local-variable 'company-backends) 'alchemist-company)))))
+    (remove-hook 'alchemist-mode-hook fn)
+    (remove-hook 'alchemist-iex-mode-hook fn)))

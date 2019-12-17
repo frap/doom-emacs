@@ -7,32 +7,20 @@
 (defun +emacs-lisp-eval (beg end)
   "Evaluate a region and print it to the echo area (if one line long), otherwise
 to a pop up buffer."
-  (require 'pp)
-  (let ((result
-         (let ((debug-on-error t)
-               (doom--current-module (ignore-errors (doom-module-from-path buffer-file-name))))
-           (eval (read
-                  (concat "(progn "
-                          (buffer-substring-no-properties beg end)
-                          "\n)"))
-                 t)))
-        (buf (get-buffer-create "*doom eval*"))
-        (inhibit-read-only t))
-    (with-current-buffer buf
-      (read-only-mode +1)
-      (erase-buffer)
-      (setq-local scroll-margin 0)
-      (let (emacs-lisp-mode-hook)
-        (emacs-lisp-mode))
-      (pp result buf)
-      (let ((lines (count-lines (point-min) (point-max))))
-        (if (> lines 1)
-            (save-selected-window
-              (pop-to-buffer buf)
-              (with-current-buffer buf
-                (goto-char (point-min))))
-          (message "%s" (buffer-substring (point-min) (point-max)))
-          (kill-buffer buf))))))
+  (+eval-display-results
+   (string-trim-right
+    (condition-case-unless-debug e
+        (let ((result
+               (let ((debug-on-error t))
+                 (eval (read (format "(progn %s)" (buffer-substring-no-properties beg end)))
+                       `((buffer-file-name . ,(buffer-file-name (buffer-base-buffer)))
+                         (doom--current-module
+                          . ,(ignore-errors
+                               (doom-module-from-path buffer-file-name))))))))
+          (require 'pp)
+          (replace-regexp-in-string "\\\\n" "\n" (pp-to-string result)))
+      (error (error-message-string e))))
+   (current-buffer)))
 
 (defvar +emacs-lisp--face nil)
 ;;;###autoload
@@ -71,6 +59,13 @@ library/userland functions"
                       (throw 'matcher t)))))))
     nil))
 
+;; `+emacs-lisp-highlight-vars-and-faces' is a potentially expensive function
+;; and should be byte-compiled, no matter what, to ensure it runs as fast as
+;; possible:
+(unless (byte-code-function-p (symbol-function '+emacs-lisp-highlight-vars-and-faces))
+  (with-no-warnings
+    (byte-compile #'+emacs-lisp-highlight-vars-and-faces)))
+
 ;;;###autoload
 (defun +emacs-lisp-lookup-documentation (thing)
   "Lookup THING with `helpful-variable' if it's a variable, `helpful-callable'
@@ -78,13 +73,6 @@ if it's callable, `apropos' otherwise."
   (if thing
       (doom/describe-symbol thing)
     (call-interactively #'doom/describe-symbol)))
-
-;; `+emacs-lisp-highlight-vars-and-faces' is a potentially expensive function
-;; and should be byte-compiled, no matter what, to ensure it runs as fast as
-;; possible:
-(when (not (byte-code-function-p (symbol-function '+emacs-lisp-highlight-vars-and-faces)))
-  (with-no-warnings
-    (byte-compile #'+emacs-lisp-highlight-vars-and-faces)))
 
 
 ;;
@@ -101,18 +89,41 @@ if it's callable, `apropos' otherwise."
                 (bury-buffer buf)
                 buf)))))
 
+;;;###autoload
+(defun +emacs-lisp/buttercup-run-file ()
+  "Run all buttercup tests in the focused buffer."
+  (interactive)
+  (let ((load-path (append (list (doom-path (dir!) "..")
+                                 (or (doom-project-root)
+                                     default-directory))
+                           load-path)))
+    (save-selected-window
+      (eval-buffer)
+      (buttercup-run))
+    (message "File executed successfully")))
+
+;;;###autoload
+(defun +emacs-lisp/buttercup-run-project ()
+  "Run all buttercup tests in the project."
+  (interactive)
+  (let* ((default-directory (doom-project-root))
+         (load-path (append (list (doom-path "test")
+                                  default-directory)
+                            load-path)))
+    (buttercup-run-discover)))
+
 
 ;;
 ;;; Hooks
 
 ;;;###autoload
-(defun +emacs-lisp|extend-imenu ()
+(defun +emacs-lisp-extend-imenu-h ()
   "Improve imenu support in `emacs-lisp-mode', including recognition for Doom's API."
   (setq imenu-generic-expression
         `(("Section" "^[ \t]*;;;;*[ \t]+\\([^\n]+\\)" 1)
           ("Evil commands" "^\\s-*(evil-define-\\(?:command\\|operator\\|motion\\) +\\(\\_<[^ ()\n]+\\_>\\)" 1)
           ("Unit tests" "^\\s-*(\\(?:ert-deftest\\|describe\\) +\"\\([^\")]+\\)\"" 1)
-          ("Package" "^\\s-*(\\(?:;;;###package\\|def-package!\\|package!\\|use-package\\|after!\\) +\\(\\_<[^ ()\n]+\\_>\\)" 1)
+          ("Package" "^\\s-*(\\(?:;;;###package\\|package!\\|use-package!?\\|after!\\) +\\(\\_<[^ ()\n]+\\_>\\)" 1)
           ("Major modes" "^\\s-*(define-derived-mode +\\([^ ()\n]+\\)" 1)
           ("Minor modes" "^\\s-*(define-\\(?:global\\(?:ized\\)?-minor\\|generic\\|minor\\)-mode +\\([^ ()\n]+\\)" 1)
           ("Modelines" "^\\s-*(def-modeline! +\\([^ ()\n]+\\)" 1)
@@ -125,7 +136,7 @@ if it's callable, `apropos' otherwise."
           ("Types" "^\\s-*(\\(cl-def\\(?:struct\\|type\\)\\|def\\(?:class\\|face\\|group\\|ine-\\(?:condition\\|error\\|widget\\)\\|package\\|struct\\|t\\(?:\\(?:hem\\|yp\\)e\\)\\)\\)\\s-+'?\\(\\(?:\\sw\\|\\s_\\|\\\\.\\)+\\)" 2))))
 
 ;;;###autoload
-(defun +emacs-lisp|reduce-flycheck-errors-in-emacs-config ()
+(defun +emacs-lisp-reduce-flycheck-errors-in-emacs-config-h ()
   "Remove `emacs-lisp-checkdoc' checker and reduce `emacs-lisp' checker
 verbosity when editing a file in `doom-private-dir' or `doom-emacs-dir'."
   (when (and (bound-and-true-p flycheck-mode)
@@ -151,3 +162,15 @@ verbosity when editing a file in `doom-private-dir' or `doom-emacs-dir'."
                  " "
                  (default-value 'flycheck-emacs-lisp-check-form)
                  ")"))))
+
+;;;###autoload
+(defun +emacs-lisp/edebug-instrument-defun-on ()
+  "Toggle on instrumentalisation for the function under `defun'."
+  (interactive)
+  (eval-defun 'edebugit))
+
+;;;###autoload
+(defun +emacs-lisp/edebug-instrument-defun-off ()
+  "Toggle off instrumentalisation for the function under `defun'."
+  (interactive)
+  (eval-defun nil))

@@ -2,13 +2,15 @@
 ;;; completion/helm/packages.el
 
 (package! helm)
-(package! helm-ag)
+(package! helm-rg)
 (package! helm-c-yasnippet)
 (package! helm-company)
-(package! helm-describe-modes :recipe (:fetcher github :repo "emacs-helm/helm-describe-modes"))
+(package! helm-describe-modes :recipe (:host github :repo "emacs-helm/helm-describe-modes"))
 (package! helm-projectile)
 (package! swiper-helm)
 (when (featurep! +fuzzy)
   (package! helm-flx))
-(when (and EMACS26+ (featurep! +childframe))
+(when (featurep! +childframe)
   (package! posframe))
+(when (featurep! :lang org)
+  (package! helm-org))

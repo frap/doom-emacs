@@ -2,7 +2,9 @@
 
 (defvar +format-on-save-enabled-modes
   '(not emacs-lisp-mode  ; elisp's mechanisms are good enough
-        sql-mode)        ; sqlformat is currently broken
+        sql-mode         ; sqlformat is currently broken
+        tex-mode         ; latexindent is broken
+        latex-mode)
   "A list of major modes in which to reformat the buffer upon saving.
 
 If this list begins with `not', then it negates the list.
@@ -25,7 +27,7 @@ Indentation is always preserved when formatting regions.")
 ;;
 ;;; Bootstrap
 
-(defun +format|enable-on-save-maybe ()
+(defun +format-enable-on-save-maybe-h ()
   "Enable formatting on save in certain major modes.
 
 This is controlled by `+format-on-save-enabled-modes'."
@@ -39,7 +41,7 @@ This is controlled by `+format-on-save-enabled-modes'."
     (format-all-mode +1)))
 
 (when (featurep! +onsave)
-  (add-hook 'after-change-major-mode-hook #'+format|enable-on-save-maybe))
+  (add-hook 'after-change-major-mode-hook #'+format-enable-on-save-maybe-h))
 
 
 ;;
@@ -47,7 +49,7 @@ This is controlled by `+format-on-save-enabled-modes'."
 
 ;; Allow a specific formatter to be used by setting `+format-with', either
 ;; buffer-locally or let-bound.
-(advice-add #'format-all--probe :around #'+format*probe)
+(advice-add #'format-all--probe :around #'+format-probe-a)
 
 ;; Doom uses a modded `format-all-buffer', which
 ;;   1. Enables partial reformatting (while preserving leading indentation),

@@ -1,6 +1,6 @@
 ;;; lang/rest/config.el -*- lexical-binding: t; -*-
 
-(def-package! restclient
+(use-package! restclient
   :mode ("\\.http\\'" . restclient-mode)
   :config
   (set-popup-rule! "^\\*HTTP Response" :size 0.4 :quit 'other)
@@ -11,12 +11,12 @@
   (setq-hook! 'restclient-mode-hook
     imenu-generic-expression '((nil "^[A-Z]+\s+.+" 0)))
 
-  ;; Forces underlying SSL verification to prompt for self-signed or invalid
-  ;; certs, rather than silently reject them.
-  (defun +rest*permit-self-signed-ssl (orig-fn &rest args)
+  (defadvice! +rest--permit-self-signed-ssl-a (orig-fn &rest args)
+    "Forces underlying SSL verification to prompt for self-signed or invalid
+certs, rather than silently reject them."
+    :around #'restclient-http-do
     (let (gnutls-verify-error tls-checktrust)
       (apply orig-fn args)))
-  (advice-add #'restclient-http-do :around #'+rest*permit-self-signed-ssl)
 
   (map! :map restclient-mode-map
         :n [return] #'+rest/dwim-at-point
@@ -30,7 +30,7 @@
         "c" #'restclient-copy-curl-command))
 
 
-(def-package! company-restclient
+(use-package! company-restclient
   :when (featurep! :completion company)
   :after restclient
   :config (set-company-backend! 'restclient-mode 'company-restclient))

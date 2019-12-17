@@ -1,69 +1,104 @@
 ;;; core/cli/test.el -*- lexical-binding: t; -*-
 
-(dispatcher! test (doom-run-tests args)
-  "Run Doom unit tests.")
+(defun doom--emacs-binary ()
+  (let ((emacs-binary-path (doom-path invocation-directory invocation-name))
+        (runemacs-binary-path (if IS-WINDOWS (doom-path invocation-directory "runemacs.exe"))))
+    (if (and runemacs-binary-path (file-exists-p runemacs-binary-path))
+        runemacs-binary-path
+      emacs-binary-path)))
 
 
-;;
-;; Library
-
-(defun doom-run-tests (&optional modules)
-  "Run all loaded tests, specified by MODULES (a list of module cons cells) or
-command line args following a double dash (each arg should be in the
-'module/submodule' format).
-
-If neither is available, run all tests in all enabled modules."
-  ;; Core libraries aren't fully loaded in a noninteractive session, so we
-  ;; reload it with `noninteractive' set to nil to force them to.
-  (let* ((noninteractive t)
-         (doom-modules (doom-modules)))
-    (quiet! (doom-reload-autoloads))
-    (let ((target-paths
-           ;; Convert targets into a list of string paths, pointing to the root
-           ;; directory of modules
-           (cond ((stringp (car modules)) ; command line
-                  (save-match-data
-                    (cl-loop for arg in modules
-                             if (string= arg ":core") collect doom-core-dir
-                             else if (string-match-p "/" arg)
-                             nconc (mapcar (apply-partially #'expand-file-name arg)
-                                           doom-modules-dirs)
-                             else
-                             nconc (cl-loop for dir in doom-modules-dirs
-                                            for path = (expand-file-name arg dir)
-                                            if (file-directory-p path)
-                                            nconc (doom-files-in path :type 'dirs :depth 1 :full t :sort nil))
-                             finally do (setq argv nil))))
-
-                 (modules ; cons-cells given to MODULES
-                  (cl-loop for (module . submodule) in modules
-                           if (doom-module-locate-path module submodule)
-                           collect it))
-
-                 ((append (list doom-core-dir)
-                          (doom-module-load-path))))))
-      ;; Load all the unit test files...
-      (require 'buttercup)
-      (mapc (lambda (file) (load file :noerror (not doom-debug-mode)))
-            (doom-files-in (mapcar (apply-partially #'expand-file-name "test/")
-                                   target-paths)
-                           :match "\\.el$" :full t))
-      ;; ... then run them
-      (when doom-debug-mode
-        (setq buttercup-stack-frame-style 'pretty))
-      (let ((split-width-threshold 0)
-            (split-height-threshold 0)
-            (window-min-width 0)
-            (window-min-height 0))
-        (buttercup-run)))))
-
-
-;;
-;; Test library
-
-(defmacro insert! (&rest text)
-  "Insert TEXT in buffer, then move cursor to last {0} marker."
-  `(progn
-     (insert ,@text)
-     (when (search-backward "{0}" nil t)
-       (replace-match "" t t))))
+(defcli! test (&rest targets)
+  "Run Doom unit tests."
+  :bare t
+  (doom-initialize 'force 'noerror)
+  (require 'ansi-color)
+  (let (files read-files)
+    (unless targets
+      (setq targets
+            (cons doom-core-dir
+                  (cl-remove-if-not
+                   (doom-rpartial #'file-in-directory-p doom-emacs-dir)
+                   ;; Omit `doom-private-dir', which is always first
+                   (let (doom-modules)
+                     (load (expand-file-name "test/init" doom-core-dir) nil t)
+                     (cdr (doom-module-load-path)))))))
+    (while targets
+      (let ((target (pop targets)))
+        ;; FIXME Module targets don't work
+        (cond ((equal target ":core")
+               (appendq! files (nreverse (doom-glob doom-core-dir "test/test-*.el"))))
+              ((file-directory-p target)
+               (setq target (expand-file-name target))
+               (appendq! files (nreverse (doom-glob target "test/test-*.el"))))
+              ((file-exists-p target)
+               (push target files)))))
+    (setenv "DOOMLOCALDIR" (concat doom-local-dir "test/"))
+    (setenv "DOOMDIR" (concat doom-core-dir "test/"))
+    (with-temp-buffer
+      (print! (start "Bootstrapping test environment, if necessary..."))
+      (cl-destructuring-bind (status . output)
+          (doom-exec-process
+           (doom--emacs-binary)
+           "--batch"
+           "--eval"
+           (prin1-to-string
+            `(progn
+               (setq user-emacs-directory ,doom-emacs-dir
+                     doom-auto-accept t)
+               (require 'core ,(locate-library "core"))
+               (require 'core-cli)
+               (doom-initialize 'force 'noerror)
+               (doom-initialize-modules)
+               (doom-cli-reload-core-autoloads 'force)
+               (when (doom-cli-packages-install)
+                 (doom-cli-reload-package-autoloads 'force)))))
+        (unless (zerop status)
+          (error "Failed to bootstrap unit tests"))))
+    (with-temp-buffer
+      (dolist (file files)
+        (if (doom-file-cookie-p file "if" t)
+            (cl-destructuring-bind (_status . output)
+                (apply #'doom-exec-process
+                       (doom--emacs-binary)
+                       "--batch"
+                       "-l" (concat doom-core-dir "core.el")
+                       "-l" (concat doom-core-dir "test/helpers.el")
+                       (append (when (file-in-directory-p file doom-modules-dir)
+                                 (list "-f" "doom-initialize-core"))
+                               (list "-l" file
+                                     "-f" "buttercup-run")))
+              (insert (replace-regexp-in-string ansi-color-control-seq-regexp "" output))
+              (push file read-files))
+          (print! (info "Ignoring %s" (relpath file)))))
+      (let ((total 0)
+            (total-failed 0)
+            (i 0))
+        (print! "\n----------------------------------------\nTests finished")
+        (print-group!
+         (goto-char (point-min))
+         (while (re-search-forward "^Ran \\([0-9]+\\) specs, \\([0-9]+\\) failed," nil t)
+           (let ((ran (string-to-number (match-string 1)))
+                 (failed (string-to-number (match-string 2))))
+             (when (> failed 0)
+               (terpri)
+               (print! (warn "(%s) Failed %d/%d tests")
+                       (path (nth i read-files))
+                       failed ran)
+               (save-excursion
+                 (print-group!
+                  (print!
+                   "%s" (string-trim
+                         (buffer-substring
+                          (match-beginning 0)
+                          (dotimes (_ failed (point))
+                            (search-backward "========================================"))))))))
+             (cl-incf total ran)
+             (cl-incf total-failed failed)
+             (cl-incf i))))
+        (terpri)
+        (if (= total-failed 0)
+            (print! (success "Ran %d tests successfully." total total-failed))
+          (print! (error "Ran %d tests, %d failed") total total-failed)
+          (kill-emacs 1)))
+      t)))

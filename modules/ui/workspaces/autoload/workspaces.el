@@ -240,15 +240,18 @@ workspace to delete."
       (if current-prefix-arg
           (completing-read (format "Delete workspace (default: %s): " current-name)
                            (+workspace-list-names)
-                           nil nil current-name)
+                           nil nil nil nil current-name)
         current-name))))
   (condition-case-unless-debug ex
+      ;; REVIEW refactor me
       (let ((workspaces (+workspace-list-names)))
         (if (not (member name workspaces))
             (+workspace-message (format "'%s' workspace doesn't exist" name) 'warn)
           (cond ((delq (selected-frame) (persp-frames-with-persp (get-frame-persp)))
                  (user-error "Can't close workspace, it's visible in another frame"))
-                ((> (length workspaces) 1)
+                ((not (equal (+workspace-current-name) name))
+                 (+workspace-delete name))
+                ((cdr workspaces)
                  (+workspace-delete name)
                  (+workspace-switch
                   (if (+workspace-exists-p +workspace--last)
@@ -260,7 +263,7 @@ workspace to delete."
                  (+workspace-switch +workspaces-main t)
                  (unless (string= (car workspaces) +workspaces-main)
                    (+workspace-delete name))
-                 (doom/kill-all-buffers)))
+                 (doom/kill-all-buffers (doom-buffer-list))))
           (+workspace-message (format "Deleted '%s' workspace" name) 'success)))
     ('error (+workspace-error ex t))))
 
@@ -271,7 +274,7 @@ workspace to delete."
   (unless (cl-every #'+workspace-delete (+workspace-list-names))
     (+workspace-error "Could not clear session"))
   (+workspace-switch +workspaces-main t)
-  (doom/kill-all-buffers))
+  (doom/kill-all-buffers (buffer-list)))
 
 ;;;###autoload
 (defun +workspace/kill-session-and-quit ()
@@ -302,7 +305,12 @@ workspace, otherwise the new workspace is blank."
 end of the workspace list."
   (interactive
    (list (or current-prefix-arg
-             (completing-read "Switch to workspace: " (+workspace-list-names)))))
+             (if (featurep! :completion ivy)
+                 (ivy-read "Switch to workspace: "
+                           (+workspace-list-names)
+                           :caller #'+workspace/switch-to
+                           :preselect (+workspace-current-name))
+               (completing-read "Switch to workspace: " (+workspace-list-names))))))
   (when (and (stringp index)
              (string-match-p "^[0-9]+$" index))
     (setq index (string-to-number index)))
@@ -315,9 +323,7 @@ end of the workspace list."
                    (error "No workspace at #%s" (1+ index)))
                  (+workspace-switch dest)))
               ((stringp index)
-               (unless (member index names)
-                 (error "No workspace named %s" index))
-               (+workspace-switch index))
+               (+workspace-switch index t))
               (t
                (error "Not a valid index: %s" index)))
         (unless (called-interactively-p 'interactive)
@@ -328,8 +334,8 @@ end of the workspace list."
 
 ;;;###autoload
 (dotimes (i 9)
-  (fset (intern (format "+workspace/switch-to-%d" i))
-        (lambda () (interactive) (+workspace/switch-to i))))
+  (defalias (intern (format "+workspace/switch-to-%d" i))
+    (lambda () (interactive) (+workspace/switch-to i))))
 
 ;;;###autoload
 (defun +workspace/switch-to-final ()
@@ -441,7 +447,7 @@ the next."
 ;;; Hooks
 
 ;;;###autoload
-(defun +workspaces|delete-associated-workspace (&optional frame)
+(defun +workspaces-delete-associated-workspace-h (&optional frame)
   "Delete workspace associated with current frame.
 A workspace gets associated with a frame when a new frame is interactively
 created."
@@ -453,17 +459,7 @@ created."
         (+workspace/delete frame-persp)))))
 
 ;;;###autoload
-(defun +workspaces|cleanup-unassociated-buffers ()
-  "Kill leftover buffers that are unassociated with any perspective."
-  (when persp-mode
-    (cl-loop for buf in (buffer-list)
-             unless (or (persp--buffer-in-persps buf)
-                        (get-buffer-window buf))
-             if (kill-buffer buf)
-             sum 1)))
-
-;;;###autoload
-(defun +workspaces|associate-frame (frame &optional _new-frame-p)
+(defun +workspaces-associate-frame-fn (frame &optional _new-frame-p)
   "Create a blank, new perspective and associate it with FRAME."
   (when persp-mode
     (if (not (persp-frame-list-without-daemon))
@@ -479,13 +475,13 @@ created."
 
 (defvar +workspaces--project-dir nil)
 ;;;###autoload
-(defun +workspaces|set-project-action ()
+(defun +workspaces-set-project-action-fn ()
   "A `projectile-switch-project-action' that sets the project directory for
-`+workspaces|switch-to-project'."
+`+workspaces-switch-to-project-h'."
   (setq +workspaces--project-dir default-directory))
 
 ;;;###autoload
-(defun +workspaces|switch-to-project (&optional dir)
+(defun +workspaces-switch-to-project-h (&optional dir)
   "Creates a workspace dedicated to a new project. If one already exists, switch
 to it. If in the main workspace and it's empty, recycle that workspace, without
 renaming it.
@@ -501,10 +497,9 @@ This be hooked to `projectile-after-switch-project-hook'."
         (if (and (not (null +workspaces-on-switch-project-behavior))
                  (or (eq +workspaces-on-switch-project-behavior t)
                      (+workspace-buffer-list)))
-            (let* (persp-p
-                   (persp
+            (let* ((persp
                     (let ((project-name (doom-project-name +workspaces--project-dir)))
-                      (or (setq persp-p (+workspace-get project-name t))
+                      (or (+workspace-get project-name t)
                           (+workspace-new project-name))))
                    (new-name (persp-name persp)))
               (+workspace-switch new-name)
@@ -518,6 +513,8 @@ This be hooked to `projectile-after-switch-project-hook'."
           (with-current-buffer (doom-fallback-buffer)
             (setq default-directory +workspaces--project-dir)
             (message "Switched to '%s'" (doom-project-name +workspaces--project-dir)))
+          (with-demoted-errors "Workspace error: %s"
+            (+workspace-rename (+workspace-current-name) (doom-project-name +workspaces--project-dir)))
           (unless current-prefix-arg
             (funcall +workspaces-switch-project-function +workspaces--project-dir)))
       (setq +workspaces--project-dir nil))))
@@ -527,7 +524,7 @@ This be hooked to `projectile-after-switch-project-hook'."
 ;;; Advice
 
 ;;;###autoload
-(defun +workspaces*autosave-real-buffers (orig-fn &rest args)
+(defun +workspaces-autosave-real-buffers-a (orig-fn &rest args)
   "Don't autosave if no real buffers are open."
   (when (doom-real-buffer-list)
     (apply orig-fn args))

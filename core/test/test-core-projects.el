@@ -1,12 +1,17 @@
 ;; -*- no-byte-compile: t; -*-
-;;; ../core/test/test-core-projects.el
-
-(require 'core-projects)
-(require 'projectile)
+;;; core/test/test-core-projects.el
 
 (describe "core/projects"
-  (before-each (projectile-mode +1))
-  (after-each  (projectile-mode -1))
+  :var (projectile-enable-caching)
+
+  (require 'core-projects)
+  (require 'projectile)
+
+  (before-each
+    (setq projectile-enable-caching nil)
+    (projectile-mode +1))
+  (after-each
+    (projectile-mode -1))
 
   (describe "project-p"
     (it "Should detect when in a valid project"
@@ -16,14 +21,14 @@
 
   (describe "project-root"
     (it "should resolve to the project's root"
-      (expect (doom-project-root doom-core-dir) :to-equal doom-emacs-dir))
+      (expect (doom-project-root doom-core-dir) :to-equal-file doom-emacs-dir))
     (it "should return nil if not in a project"
       (expect (doom-project-root (expand-file-name "~")) :to-be nil)))
 
   (describe "project-expand"
     (it "expands to a path relative to the project root"
-      (expect (doom-project-expand "init.el" doom-core-dir)
-              :to-equal (expand-file-name "init.el" (doom-project-root doom-core-dir)))))
+      (expect (doom-project-expand "init.el" doom-core-dir) :to-equal-file
+              (expand-file-name "init.el" (doom-project-root doom-core-dir)))))
 
   (describe "project-file-exists-p!"
     (let ((default-directory doom-core-dir))

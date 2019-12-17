@@ -1,6 +1,10 @@
 ;;; lang/haskell/config.el -*- lexical-binding: t; -*-
 
-(cond ((featurep! +intero) (load! "+intero"))
+(after! projectile
+  (add-to-list 'projectile-project-root-files "stack.yaml"))
+
+;; TODO ghcide?
+(cond ((featurep! +intero) (load! "+intero")) ; DEPRECATED
       ((featurep! +dante)  (load! "+dante"))
       ((featurep! +lsp)    (load! "+lsp")))
 
@@ -13,13 +17,18 @@
         haskell-process-auto-import-loaded-modules t
         haskell-process-show-overlays (not (featurep! :tools flycheck))) ; redundant with flycheck
 
-  (set-lookup-handlers! 'haskell-mode :definition #'haskell-mode-jump-to-def-or-tag)
-  (set-file-template! 'haskell-mode :trigger #'haskell-auto-insert-module-template :project t)
-  (set-repl-handler! '(haskell-mode haskell-cabal-mode literate-haskell-mode) #'+haskell/open-repl)
+  (set-lookup-handlers! 'haskell-mode
+    :definition #'haskell-mode-jump-to-def-or-tag)
+  (set-file-template! 'haskell-mode
+    :trigger #'haskell-auto-insert-module-template
+    :project t)
+  (set-repl-handler!
+    '(haskell-mode haskell-cabal-mode literate-haskell-mode)
+    #'+haskell/open-repl :persist t)
 
   (add-hook! 'haskell-mode-hook
-    #'(haskell-collapse-mode  ; support folding haskell code blocks
-       interactive-haskell-mode))
+             #'haskell-collapse-mode ; support folding haskell code blocks
+             #'interactive-haskell-mode)
 
   (add-to-list 'completion-ignored-extensions ".hi")
 

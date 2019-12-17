@@ -7,9 +7,13 @@
     minibuffer-local-must-match-map
     minibuffer-local-isearch-map
     read-expression-map
-    ,@(when (featurep! :completion ivy)
-        '(ivy-minibuffer-map
-          ivy-switch-buffer-map)))
+    ,@(cond ((featurep! :completion ivy)
+             '(ivy-minibuffer-map
+               ivy-switch-buffer-map))
+            ((featurep! :completion helm)
+             '(helm-map
+               helm-ag-map
+               helm-read-file-map))))
   "A list of all the keymaps used for the minibuffer.")
 
 
@@ -35,6 +39,20 @@
         epa-pinentry-mode 'loopback))
 
 
+(use-package! drag-stuff
+  :defer t
+  :init
+  (map! "<M-up>"    #'drag-stuff-up
+        "<M-down>"  #'drag-stuff-down
+        "<M-left>"  #'drag-stuff-left
+        "<M-right>" #'drag-stuff-right))
+
+
+;;;###package tramp
+(unless IS-WINDOWS
+  (setq tramp-default-method "ssh")) ; faster than the default scp
+
+
 ;;
 ;;; Smartparens config
 
@@ -44,13 +62,18 @@
   ;; or specific :post-handlers with:
   ;;   (sp-pair "{" nil :post-handlers '(:rem ("| " "SPC")))
   (after! smartparens
+    ;; Smartparens is broken in `cc-mode' as of Emacs 27. See
+    ;; <https://github.com/Fuco1/smartparens/issues/963>.
+    (unless EMACS27+
+      (pushnew! sp--special-self-insert-commands 'c-electric-paren 'c-electric-brace))
+
     ;; Smartparens' navigation feature is neat, but does not justify how
     ;; expensive it is. It's also less useful for evil users. This may need to
     ;; be reactivated for non-evil users though. Needs more testing!
-    (defun doom|disable-smartparens-navigate-skip-match ()
-      (setq sp-navigate-skip-match nil
-            sp-navigate-consider-sgml-tags nil))
-    (add-hook 'after-change-major-mode-hook #'doom|disable-smartparens-navigate-skip-match)
+    (add-hook! 'after-change-major-mode-hook
+      (defun doom-disable-smartparens-navigate-skip-match-h ()
+        (setq sp-navigate-skip-match nil
+              sp-navigate-consider-sgml-tags nil)))
 
     ;; Autopair quotes more conservatively; if I'm next to a word/before another
     ;; quote, I likely don't want to open a new pair.
@@ -101,10 +124,27 @@
       ;; intelligently. The result isn't very intelligent (causes redundant
       ;; characters), so just do it ourselves.
       (define-key! c++-mode-map "<" nil ">" nil)
+
+      (defun +default-cc-sp-point-is-template-p (id action context)
+        "Return t if point is in the right place for C++ angle-brackets."
+        (and (sp-in-code-p id action context)
+             (cond ((eq action 'insert)
+                    (sp-point-after-word-p id action context))
+                   ((eq action 'autoskip)
+                    (/= (char-before) 32)))))
+
+      (defun +default-cc-sp-point-after-include-p (id action context)
+        "Return t if point is in an #include."
+        (and (sp-in-code-p id action context)
+             (save-excursion
+               (goto-char (line-beginning-position))
+               (looking-at-p "[ 	]*#include[^<]+"))))
+
       ;; ...and leave it to smartparens
       (sp-local-pair '(c++-mode objc-mode)
                      "<" ">"
-                     :when '(+cc-sp-point-is-template-p +cc-sp-point-after-include-p)
+                     :when '(+default-cc-sp-point-is-template-p
+                             +default-cc-sp-point-after-include-p)
                      :post-handlers '(("| " "SPC")))
 
       (sp-local-pair '(c-mode c++-mode objc-mode java-mode)
@@ -138,6 +178,27 @@
                        :actions '(insert)
                        :post-handlers '(("| " "SPC") ("|\n[i]*)[d-2]" "RET")))))
 
+    (after! smartparens-markdown
+      (sp-with-modes '(markdown-mode gfm-mode)
+        (sp-local-pair "```" "```" :post-handlers '(:add ("||\n[i]" "RET")))
+
+        ;; The original rules for smartparens had an odd quirk: inserting two
+        ;; asterixex would replace nearby quotes with asterixes. These two rules
+        ;; set out to fix this.
+        (sp-local-pair "**" nil :actions :rem)
+        (sp-local-pair "*" "*"
+                       :actions '(insert skip)
+                       :unless '(:rem sp-point-at-bol-p)
+                       ;; * then SPC will delete the second asterix and assume
+                       ;; you wanted a bullet point. * followed by another *
+                       ;; will produce an extra, assuming you wanted **|**.
+                       :post-handlers '(("[d1]" "SPC") ("|*" "*"))))
+
+      ;; This keybind allows * to skip over **.
+      (map! :map markdown-mode-map
+            :ig "*" (λ! (if (looking-at-p "\\*\\* *$")
+                            (forward-char 2)
+                          (call-interactively 'self-insert-command)))))
 
     ;; Highjacks backspace to:
     ;;  a) balance spaces inside brackets/parentheses ( | ) -> (|)
@@ -152,10 +213,10 @@
     ;;  e) properly delete smartparen pairs when they are encountered, without
     ;;     the need for strict mode.
     ;;  f) do none of this when inside a string
-    (advice-add #'delete-backward-char :override #'+default*delete-backward-char))
+    (advice-add #'delete-backward-char :override #'+default--delete-backward-char-a))
 
   ;; Makes `newline-and-indent' continue comments (and more reliably)
-  (advice-add #'newline-and-indent :override #'+default*newline-indent-and-continue-comments))
+  (advice-add #'newline-and-indent :override #'+default--newline-indent-and-continue-comments-a))
 
 
 ;;
@@ -198,9 +259,9 @@
         "s--" #'doom/decrease-font-size
         ;; Conventional text-editing keys & motions
         "s-a" #'mark-whole-buffer
-        :g "s-/" (λ! (save-excursion (comment-line 1)))
-        :n "s-/" #'evil-commentary-line
-        :v "s-/" #'evil-commentary
+        "s-/" (λ! (save-excursion (comment-line 1)))
+        :n "s-/" #'evilnc-comment-or-uncomment-lines
+        :v "s-/" #'evilnc-comment-operator
         :gi  [s-backspace] #'doom/backward-kill-to-bol-and-indent
         :gi  [s-left]      #'doom/backward-to-bol-or-indent
         :gi  [s-right]     #'doom/forward-to-last-non-comment-or-eol
@@ -217,12 +278,9 @@
 (define-key! help-map
   ;; new keybinds
   "'"    #'describe-char
-  "B"    #'doom/open-bug-report
-  "D"    #'doom/help
   "E"    #'doom/sandbox
   "M"    #'doom/describe-active-minor-mode
   "O"    #'+lookup/online
-  "R"    #'doom/reload
   "T"    #'doom/toggle-profiler
   "V"    #'set-variable
   "W"    #'+default/man-or-woman
@@ -243,46 +301,67 @@
   "rf"   #'doom/reload-font
   "re"   #'doom/reload-env
 
+  ;; make `describe-bindings' available under the b prefix which it previously
+  ;; occupied. Add more binding related commands under that prefix as well
+  "b"    nil
+  "bb"   #'describe-bindings
+  "bi"   #'which-key-show-minor-mode-keymap
+  "bm"   #'which-key-show-major-mode
+  "bt"   #'which-key-show-top-level
+  "bf"   #'which-key-show-full-keymap
+  "bk"   #'which-key-show-keymap
+
   ;; replaces `apropos-documentation' b/c `apropos' covers this
   "d"    nil
-  "d/"   #'doom/help-search
   "da"   #'doom/help-autodefs
   "db"   #'doom/report-bug
   "dd"   #'doom/toggle-debug-mode
   "df"   #'doom/help-faq
   "dh"   #'doom/help
+  "dk"   #'doom/goto-packages-file
+  "dl"   #'doom/help-search-load-path
   "dm"   #'doom/help-modules
   "dn"   #'doom/help-news
   "dN"   #'doom/help-news-search
+  "di"   #'doom/goto-doomblock
   "dp"   #'doom/help-packages
   "dP"   #'doom/help-package-homepage
-  "dc"   #'doom/help-package-config
-  "ds"   #'doom/sandbox
+  "dc"   #'doom/goto-config-file
+  "dC"   #'doom/help-package-config
+  "ds"   #'doom/help-search
+  "dx"   #'doom/sandbox
   "dt"   #'doom/toggle-profiler
   "dv"   #'doom/version
 
   ;; replaces `apropos-command'
   "a"    #'apropos
+  "A"    #'apropos-documentation
   ;; replaces `describe-copying' b/c not useful
   "C-c"  #'describe-coding-system
   ;; replaces `Info-got-emacs-command-node' b/c redundant w/ `Info-goto-node'
   "F"    #'describe-face
   ;; replaces `view-hello-file' b/c annoying
-  "h"    #'doom/help
-  ;; replaces `describe-language-environment' b/c remapped to C-l
-  "L"    #'global-command-log-mode
+  "h"    nil
   ;; replaces `view-emacs-news' b/c it's on C-n too
   "n"    #'doom/help-news
-  ;; replaces `finder-by-keyword'
+  ;; replaces `help-with-tutorial', b/c it's less useful than `load-theme'
+  "t"    #'load-theme
+  ;; replaces `finder-by-keyword' b/c not useful
   "p"    #'doom/help-packages
   ;; replaces `describe-package' b/c redundant w/ `doom/describe-package'
   "P"    #'find-library)
 
 (after! which-key
-  (which-key-add-key-based-replacements "C-h r" "reload")
-  (when (featurep 'evil)
-    (which-key-add-key-based-replacements (concat doom-leader-key     " r") "reload")
-    (which-key-add-key-based-replacements (concat doom-leader-alt-key " r") "reload")))
+  (let ((prefix-re (regexp-opt (list doom-leader-key doom-leader-alt-key))))
+    (cl-pushnew `((,(format "\\`\\(?:<\\(?:\\(?:f1\\|help\\)>\\)\\|C-h\\|%s h\\) d\\'" prefix-re))
+                  nil . "doom")
+                which-key-replacement-alist)
+    (cl-pushnew `((,(format "\\`\\(?:<\\(?:\\(?:f1\\|help\\)>\\)\\|C-h\\|%s h\\) r\\'" prefix-re))
+                  nil . "reload")
+                which-key-replacement-alist)
+    (cl-pushnew `((,(format "\\`\\(?:<\\(?:\\(?:f1\\|help\\)>\\)\\|C-h\\|%s h\\) b\\'" prefix-re))
+                  nil . "bindings")
+                which-key-replacement-alist)))
 
 
 (when (featurep! +bindings)

@@ -3,6 +3,14 @@
 
 ;; Major modes
 (package! pip-requirements)
+(when (featurep! +cython)
+  (package! cython-mode)
+  (when (featurep! :tools flycheck)
+    (package! flycheck-cython)))
+
+;; LSP
+(when (featurep! +lsp)
+  (package! lsp-python-ms))
 
 ;; Programming environment
 (package! anaconda-mode)
@@ -23,3 +31,4 @@
 
 ;; Import managements
 (package! pyimport)
+(package! py-isort)

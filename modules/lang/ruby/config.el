@@ -1,16 +1,20 @@
 ;;; lang/ruby/config.el -*- lexical-binding: t; -*-
 
-;;
-;; Packages
+(after! projectile
+  (add-to-list 'projectile-project-root-files "Gemfile"))
 
-(def-package! enh-ruby-mode
-  :mode ("\\.\\(?:pry\\|irb\\)rc\\'" . +ruby|init)
-  :mode ("\\.\\(?:rb\\|rake\\|rabl\\|ru\\|builder\\|gemspec\\|jbuilder\\|thor\\)\\'" .  +ruby|init)
-  :mode ("/\\(?:Berks\\|Cap\\|Gem\\|Guard\\|Pod\\|Puppet\\|Rake\\|Thor\\|Vagrant\\)file\\'" .  +ruby|init)
+
+;;
+;;; Packages
+
+(use-package! enh-ruby-mode
+  :mode ("\\.\\(?:pry\\|irb\\)rc\\'" . +ruby-init-h)
+  :mode ("\\.\\(?:rb\\|rake\\|rabl\\|ru\\|builder\\|gemspec\\|jbuilder\\|thor\\)\\'" .  +ruby-init-h)
+  :mode ("/\\(?:Berks\\|Cap\\|Gem\\|Guard\\|Pod\\|Puppet\\|Rake\\|Thor\\|Vagrant\\)file\\'" .  +ruby-init-h)
   :preface
   (after! ruby-mode
     (require 'enh-ruby-mode))
-  (defun +ruby|init ()
+  (defun +ruby-init-h ()
     "Enable `enh-ruby-mode' if ruby is available, otherwise `ruby-mode'."
     (if (executable-find "ruby")
         (enh-ruby-mode)
@@ -26,18 +30,23 @@
     (add-to-list 'company-dabbrev-code-modes 'enh-ruby-mode nil #'eq)
     (add-to-list 'company-dabbrev-code-modes 'ruby-mode nil #'eq))
 
+  (after! inf-ruby
+    ;; switch to inf-ruby from compile if we detect a breakpoint has been hit
+    (add-hook 'compilation-filter-hook 'inf-ruby-auto-enter))
+
   ;; so class and module pairs work
   (setq-hook! (ruby-mode enh-ruby-mode) sp-max-pair-length 6))
 
 
-(def-package! robe
+(use-package! robe
   :defer t
   :init
-  (defun +ruby|init-robe-mode-maybe ()
-    "Start `robe-mode' if `lsp-mode' isn't active."
-    (unless (bound-and-true-p lsp-mode)
-      (robe-mode +1)))
-  (add-hook 'enh-ruby-mode-hook #'+ruby|init-robe-mode-maybe)
+  (add-hook! 'enh-ruby-mode-hook
+    (defun +ruby-init-robe-mode-maybe-h ()
+      "Start `robe-mode' if `lsp-mode' isn't active."
+      (unless (or (bound-and-true-p lsp-mode)
+                  (bound-and-true-p lsp--buffer-deferred))
+        (robe-mode +1))))
   :config
   (set-repl-handler! 'enh-ruby-mode #'robe-start)
   (set-company-backend! 'enh-ruby-mode 'company-robe)
@@ -52,19 +61,19 @@
         "rr" #'robe-rails-refresh
         ;; inf-enh-ruby-mode
         :prefix "s"
-        "f"  #'ruby-send-definition
-        "F"  #'ruby-send-definition-and-go
+        "d"  #'ruby-send-definition
+        "D"  #'ruby-send-definition-and-go
         "r"  #'ruby-send-region
         "R"  #'ruby-send-region-and-go
         "i"  #'ruby-switch-to-inf))
 
 
 ;; NOTE Must be loaded before `robe-mode'
-(def-package! yard-mode
+(use-package! yard-mode
   :hook (ruby-mode enh-ruby-mode))
 
 
-(def-package! rubocop
+(use-package! rubocop
   :hook (enh-ruby-mode . rubocop-mode)
   :config
   (map! :localleader
@@ -76,9 +85,9 @@
 
 
 ;;
-;; Package & Ruby version management
+;;; Package & Ruby version management
 
-(def-package! rake
+(use-package! rake
   :defer t
   :init
   (setq rake-cache-file (concat doom-cache-dir "rake.cache"))
@@ -91,7 +100,7 @@
         "R" #'rake-regenerate-cache
         "f" #'rake-find-task))
 
-(def-package! bundler
+(use-package! bundler
   :defer t
   :init
   (map! :after enh-ruby-mode
@@ -111,9 +120,9 @@
 
 
 ;;
-;; Testing frameworks
+;;; Testing frameworks
 
-(def-package! rspec-mode
+(use-package! rspec-mode
   :mode ("/\\.rspec\\'" . text-mode)
   :init
   (when (featurep! :editor evil)
@@ -142,7 +151,7 @@
         "s" #'rspec-dired-verify-single))
 
 
-(def-package! minitest
+(use-package! minitest
   :defer t
   :config
   (when (featurep! :editor evil)

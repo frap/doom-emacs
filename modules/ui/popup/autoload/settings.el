@@ -14,39 +14,28 @@
   "Default properties for popup rules defined with `set-popup-rule!'.")
 
 ;;;###autoload
-(defun +popup--make (predicate plist)
-  (cond ((and plist (not (keywordp (car plist))))
-         ;; FIXME deprecated popup rule support
-         (message "Warning: the old usage of `set-popup-rule!' is deprecated; update the rule for '%s'"
-                  predicate)
-         (cl-destructuring-bind (condition &optional alist parameters)
-             (list predicate (car plist) (cadr plist))
-           (if (eq alist :ignore)
-               (list condition nil)
-             `(,condition (+popup-buffer)
-                          ,@alist
-                          (window-parameters ,@parameters)))))
-        ((plist-get plist :ignore)
-         (list predicate nil))
-        ((let* ((plist (append plist +popup-defaults))
-                (alist
-                 `((actions       . ,(plist-get plist :actions))
-                   (side          . ,(plist-get plist :side))
-                   (size          . ,(plist-get plist :size))
-                   (window-width  . ,(plist-get plist :width))
-                   (window-height . ,(plist-get plist :height))
-                   (slot          . ,(plist-get plist :slot))
-                   (vslot         . ,(plist-get plist :vslot))))
-                (params
-                 `((ttl      . ,(plist-get plist :ttl))
-                   (quit     . ,(plist-get plist :quit))
-                   (select   . ,(plist-get plist :select))
-                   (modeline . ,(plist-get plist :modeline))
-                   (autosave . ,(plist-get plist :autosave))
-                   ,@(plist-get plist :parameters))))
-           `(,predicate (+popup-buffer)
-                        ,@alist
-                        (window-parameters ,@params))))))
+(defun +popup-make-rule (predicate plist)
+  (if (plist-get plist :ignore)
+      (list predicate nil)
+    (let* ((plist (append plist +popup-defaults))
+           (alist
+            `((actions       . ,(plist-get plist :actions))
+              (side          . ,(plist-get plist :side))
+              (size          . ,(plist-get plist :size))
+              (window-width  . ,(plist-get plist :width))
+              (window-height . ,(plist-get plist :height))
+              (slot          . ,(plist-get plist :slot))
+              (vslot         . ,(plist-get plist :vslot))))
+           (params
+            `((ttl      . ,(plist-get plist :ttl))
+              (quit     . ,(plist-get plist :quit))
+              (select   . ,(plist-get plist :select))
+              (modeline . ,(plist-get plist :modeline))
+              (autosave . ,(plist-get plist :autosave))
+              ,@(plist-get plist :parameters))))
+      `(,predicate (+popup-buffer)
+                   ,@alist
+                   (window-parameters ,@params)))))
 
 ;;;###autodef
 (defun set-popup-rule! (predicate &rest plist)
@@ -58,7 +47,8 @@ variants) will not be affected by these rules (as they are unaffected by
 `display-buffer-alist', which powers the popup management system).
 
 PREDICATE can be either a) a regexp string (matched against the buffer's name)
-or b) a function that takes no arguments and returns a boolean.
+or b) a function that takes two arguments (a buffer name and the ACTION argument
+of `display-buffer') and returns a boolean.
 
 PLIST can be made up of any of the following properties:
 
@@ -74,7 +64,7 @@ PLIST can be made up of any of the following properties:
 
 :side 'bottom|'top|'left|'right
   Which side of the frame to open the popup on. This is only respected if
-  `+popup-display-buffer-stacked-side-window' or `display-buffer-in-side-window'
+  `+popup-display-buffer-stacked-side-window-fn' or `display-buffer-in-side-window'
   is in :actions or `+popup-default-display-buffer-actions'.
 
 :size/:width/:height FLOAT|INT|FN
@@ -93,7 +83,7 @@ PLIST can be made up of any of the following properties:
 
 :slot/:vslot INT
   (This only applies to popups with a :side and only if :actions is blank or
-  contains the `+popup-display-buffer-stacked-side-window' action) These control
+  contains the `+popup-display-buffer-stacked-side-window-fn' action) These control
   how multiple popups are laid out. INT can be any integer, positive and
   negative.
 
@@ -170,7 +160,7 @@ used.
 
 \(fn PREDICATE &key IGNORE ACTIONS SIDE SIZE WIDTH HEIGHT SLOT VSLOT TTL QUIT SELECT MODELINE AUTOSAVE PARAMETERS)"
   (declare (indent defun))
-  (push (+popup--make predicate plist) +popup--display-buffer-alist)
+  (push (+popup-make-rule predicate plist) +popup--display-buffer-alist)
   (when (bound-and-true-p +popup-mode)
     (setq display-buffer-alist +popup--display-buffer-alist))
   +popup--display-buffer-alist)
@@ -193,7 +183,7 @@ Example:
   (declare (indent 0))
   (dolist (rules rulesets)
     (dolist (rule rules)
-      (push (+popup--make (car rule) (cdr rule))
+      (push (+popup-make-rule (car rule) (cdr rule))
             +popup--display-buffer-alist)))
   (when (bound-and-true-p +popup-mode)
     (setq display-buffer-alist +popup--display-buffer-alist))

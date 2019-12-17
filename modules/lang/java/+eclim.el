@@ -3,7 +3,7 @@
 
 ;; NOTE This submodule is incomplete
 
-(def-package! eclim
+(use-package! eclim
   :hook (java-mode . eclim-mode)
   :config
   (set-lookup-handlers! 'java-mode
@@ -18,13 +18,13 @@
 
   (map! :localleader
         :map java-mode-map
-        (:prefix "r"
+        (:prefix ("r" . "refactor")
           "gc" #'eclim-java-constructor
           "gg" #'eclim-java-generate-getter-and-setter
           "oi" #'eclim-java-import-organize
           "f"  #'eclim-java-format
           "r"  #'eclim-java-refactor-rename-symbol-at-point)
-        (:prefix "h"
+        (:prefix ("h" . "help")
           "."  #'eclim-java-show-documentation-for-current-element
           "r"  #'eclim-java-find-references
           "c"  #'eclim-java-call-hierarchy
@@ -32,7 +32,7 @@
           "p"  #'eclim-problems
           "r"  #'meghanada-reference
           "t"  #'meghanada-typeinfo)
-        (:prefix "b"
+        (:prefix ("b" . "build")
           "b"  #'eclim-project-build
           "c"  #'eclim-project-create
           "d"  #'eclim-project-delete
@@ -43,7 +43,7 @@
           "u"  #'eclim-project-update)))
 
 
-(def-package! company-emacs-eclim
+(use-package! company-emacs-eclim
   :when (featurep! :completion company)
   :after java-mode
   :config

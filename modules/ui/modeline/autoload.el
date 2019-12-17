@@ -12,7 +12,7 @@
 
 (defvar +modeline--old-bar-height nil)
 ;;;###autoload
-(defun +modeline|resize-for-font ()
+(defun +modeline-resize-for-font-h ()
   "Adjust the modeline's height when the font size is changed by
 `doom/increase-font-size' or `doom/decrease-font-size'.
 
@@ -28,12 +28,10 @@ Meant for `doom-change-font-size-hook'."
                                  xlfd-regexp-pixelsize-subnum)))
                (scale (frame-parameter nil 'font-scale)))
           (setq doom-modeline-height (+ default-height (* scale doom-font-increment))))
-      (setq doom-modeline-height default-height))
-    ;; already has a variable watcher in Emacs 26+
-    (unless EMACS26+ (doom-modeline-refresh-bars))))
+      (setq doom-modeline-height default-height))))
 
 ;;;###autoload
-(defun +modeline|update-env-in-all-windows (&rest _)
+(defun +modeline-update-env-in-all-windows-h (&rest _)
   "Update version strings in all buffers."
   (dolist (window (window-list))
     (with-selected-window window
@@ -41,7 +39,7 @@ Meant for `doom-change-font-size-hook'."
       (force-mode-line-update))))
 
 ;;;###autoload
-(defun +modeline|clear-env-in-all-windows (&rest _)
+(defun +modeline-clear-env-in-all-windows-h (&rest _)
   "Blank out version strings in all buffers."
   (dolist (buffer (buffer-list))
     (with-current-buffer buffer

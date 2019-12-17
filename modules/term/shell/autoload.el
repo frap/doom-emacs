@@ -49,12 +49,13 @@ prompt."
 If popup is visible but unselected, selected it.
 If popup is focused, kill it."
   (interactive)
-  (let* ((buffer-name
-          (get-buffer-create
-           (format "*doom:shell-popup:%s*"
-                   (if (bound-and-true-p persp-mode)
-                       (safe-persp-name (get-current-persp))
-                     "main")))))
+  (let ((buffer
+         (get-buffer-create
+          (format "*doom:shell-popup:%s*"
+                  (if (bound-and-true-p persp-mode)
+                      (safe-persp-name (get-current-persp))
+                    "main"))))
+        (dir default-directory))
     (if-let (win (get-buffer-window buffer))
         (if (eq (selected-window) win)
             (let (confirm-kill-processes)
@@ -68,7 +69,7 @@ If popup is focused, kill it."
       (with-current-buffer (pop-to-buffer buffer)
         (if (not (eq major-mode 'shell-mode))
             (shell buffer)
-          (erase-buffer)
+          (run-mode-hooks 'shell-mode-hook)
           (cd dir))
         (let ((process (get-buffer-process (current-buffer))))
           (set-process-sentinel process #'+shell--sentinel)

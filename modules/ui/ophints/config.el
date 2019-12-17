@@ -1,6 +1,6 @@
 ;;; ui/ophints/config.el -*- lexical-binding: t; -*-
 
-(def-package! evil-goggles
+(use-package! evil-goggles
   :when (featurep! :editor evil)
   :after-call pre-command-hook
   :init
@@ -11,10 +11,19 @@
         evil-goggles-enable-delete nil
         evil-goggles-enable-change nil)
   :config
+  (pushnew! evil-goggles--commands
+            '(+evil:yank-unindented
+              :face evil-goggles-yank-face
+              :switch evil-goggles-enable-yank
+              :advice evil-goggles--generic-async-advice)
+            '(+eval:region
+              :face evil-goggles-yank-face
+              :switch evil-goggles-enable-yank
+              :advice evil-goggles--generic-async-advice))
   (evil-goggles-mode +1))
 
 
-(def-package! volatile-highlights
+(use-package! volatile-highlights
   :unless (featurep! :editor evil)
   :after-call pre-command-hook
   :config

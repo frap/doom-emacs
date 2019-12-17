@@ -3,6 +3,3 @@
 
 (package! sbt-mode)
 (package! scala-mode)
-
-(unless (featurep! +lsp)
-  (package! ensime))

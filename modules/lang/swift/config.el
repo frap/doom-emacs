@@ -4,22 +4,31 @@
   (set-repl-handler! 'swift-mode #'run-swift))
 
 
-(def-package! flycheck-swift
-  :when (and (featurep! :tools flycheck)
-             (not (featurep! +lsp)))
+(use-package! flycheck-swift
+  :when (featurep! :tools flycheck)
+  :unless (featurep! +lsp)
   :after swift-mode
   :config (flycheck-swift-setup))
 
 
-(def-package! company-sourcekit
-  :when (and (featurep! :completion company)
-             (not (featurep! +lsp)))
+(use-package! company-sourcekit
+  :when (featurep! :completion company)
+  :unless (featurep! +lsp)
   :after swift-mode
   :config
   (set-company-backend! 'swift-mode '(company-sourcekit company-yasnippet)))
 
 
-(def-package! lsp-sourcekit
+(use-package! lsp-sourcekit
   :when (featurep! +lsp)
   :after swift-mode
-  :init (add-hook 'swift-mode-hook #'lsp!))
+  :init (add-hook 'swift-mode-local-vars-hook #'lsp!)
+  :config
+  (unless (getenv "SOURCEKIT_TOOLCHAIN_PATH")
+    (setenv "SOURCEKIT_TOOLCHAIN_PATH" "/Library/Developer/Toolchains/swift-latest.xctoolchain"))
+  (setq lsp-sourcekit-executable
+        (cl-find-if #'executable-find
+                    (list lsp-sourcekit-executable ; 'sourcekit' by default
+                          "sourcekit-lsp"
+                          "/Library/Developer/Toolchains/swift-latest.xctoolchain/usr/bin/sourcekit"
+                          "/Library/Developer/Toolchains/swift-latest.xctoolchain/usr/bin/sourcekit-lsp"))))

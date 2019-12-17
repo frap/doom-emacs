@@ -1,14 +1,14 @@
 ;;; lang/ledger/config.el -*- lexical-binding: t; -*-
 
-;; `ledger-mode'
+;;;###package ledger-mode
 (setq ledger-clear-whole-transactions 1)
 
-(defun +ledger*check-version (orig-fn)
+(defadvice! +ledger--check-version-a (orig-fn)
   "Fail gracefully if ledger binary isn't available."
+  :around #'ledger-check-version
   (if (executable-find ledger-binary-path)
       (funcall orig-fn)
     (message "Couldn't find '%s' executable" ledger-binary-path)))
-(advice-add #'ledger-check-version :around #'+ledger*check-version)
 
 ;; Restore leader key in ledger reports
 (map! :after ledger-mode
@@ -20,12 +20,12 @@
       [tab] #'ledger-reconcile-toggle)
 
 
-(def-package! flycheck-ledger
+(use-package! flycheck-ledger
   :when (featurep! :tools flycheck)
   :after ledger-mode)
 
 
-(def-package! evil-ledger
+(use-package! evil-ledger
   :when (featurep! :editor evil +everywhere)
   :hook (ledger-mode . evil-ledger-mode)
   :config
@@ -51,7 +51,8 @@
         (:prefix "g"
           "s" #'ledger-display-ledger-stats
           "b" #'ledger-display-balance-at-point))
-  ;; Fix inaccurate keybind message
-  (defun +ledger*fix-key-help (&rest _)
-    (message "q to quit; gr to redo; RET to edit; C-c C-s to save"))
-  (advice-add #'ledger-report :after #'+ledger*fix-key-help))
+
+  (defadvice! +ledger--fix-key-help-a (&rest _)
+    "Fix inaccurate keybind message."
+    :after #'ledger-report
+    (message "q to quit; gr to redo; RET to edit; C-c C-s to save")))

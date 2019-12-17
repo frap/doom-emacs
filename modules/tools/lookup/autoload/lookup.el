@@ -1,8 +1,7 @@
 ;;; tools/lookup/autoload/lookup.el -*- lexical-binding: t; -*-
 
 ;;;###autodef
-(cl-defun set-lookup-handlers!
-    (modes &rest plist &key definition references documentation file xref-backend async)
+(defun set-lookup-handlers! (modes &rest plist)
   "Define jump handlers for major or minor MODES.
 
 A handler is either an interactive command that changes the current buffer
@@ -56,32 +55,36 @@ defined for other minor modes or the major mode it's activated in.
 
 This can be passed nil as its second argument to unset handlers for MODES. e.g.
 
-  (set-lookup-handlers! 'python-mode nil)"
+  (set-lookup-handlers! 'python-mode nil)
+
+\(fn MODES &key DEFINITION REFERENCES DOCUMENTATION FILE XREF-BACKEND ASYNC)"
   (declare (indent defun))
   (dolist (mode (doom-enlist modes))
     (let ((hook (intern (format "%s-hook" mode)))
-          (fn   (intern (format "+lookup|init-%s-handlers" mode))))
+          (fn   (intern (format "+lookup--init-%s-handlers-h" mode))))
       (cond ((null (car plist))
              (remove-hook hook fn)
              (unintern fn nil))
             ((fset
               fn
               (lambda ()
-                (cl-mapc #'+lookup--set-handler
-                         (list definition
-                               references
-                               documentation
-                               file
-                               xref-backend)
-                         (list '+lookup-definition-functions
-                               '+lookup-references-functions
-                               '+lookup-documentation-functions
-                               '+lookup-file-functions
-                               'xref-backend-functions)
-                         (make-list 5 async)
-                         (make-list 5 (or (eq major-mode mode)
-                                          (and (boundp mode)
-                                               (symbol-value mode)))))))
+                (cl-destructuring-bind (&key definition references documentation file xref-backend async)
+                    plist
+                  (cl-mapc #'+lookup--set-handler
+                           (list definition
+                                 references
+                                 documentation
+                                 file
+                                 xref-backend)
+                           (list '+lookup-definition-functions
+                                 '+lookup-references-functions
+                                 '+lookup-documentation-functions
+                                 '+lookup-file-functions
+                                 'xref-backend-functions)
+                           (make-list 5 async)
+                           (make-list 5 (or (eq major-mode mode)
+                                            (and (boundp mode)
+                                                 (symbol-value mode))))))))
              (add-hook hook fn))))))
 
 
@@ -137,8 +140,9 @@ This can be passed nil as its second argument to unset handlers for MODES. e.g.
               (if-let*
                   ((handler (intern-soft
                              (completing-read "Select lookup handler: "
-                                              (remq t (append (symbol-value handlers)
-                                                              (default-value handlers)))
+                                              (delete-dups
+                                               (remq t (append (symbol-value handlers)
+                                                               (default-value handlers))))
                                               nil t))))
                   (+lookup--run-handlers handler identifier origin)
                 (user-error "No lookup handler selected"))
@@ -183,15 +187,15 @@ This can be passed nil as its second argument to unset handlers for MODES. e.g.
           'deferred
         t))))
 
-(defun +lookup-xref-definitions-backend (identifier)
+(defun +lookup-xref-definitions-backend-fn (identifier)
   "Non-interactive wrapper for `xref-find-definitions'"
   (+lookup--xref-show 'xref-backend-definitions identifier))
 
-(defun +lookup-xref-references-backend (identifier)
+(defun +lookup-xref-references-backend-fn (identifier)
   "Non-interactive wrapper for `xref-find-references'"
   (+lookup--xref-show 'xref-backend-references identifier))
 
-(defun +lookup-dumb-jump-backend (_identifier)
+(defun +lookup-dumb-jump-backend-fn (_identifier)
   "Look up the symbol at point (or selection) with `dumb-jump', which conducts a
 project search with ag, rg, pt, or git-grep, combined with extra heuristics to
 reduce false positives.
@@ -200,24 +204,22 @@ This backend prefers \"just working\" over accuracy."
   (and (require 'dumb-jump nil t)
        (dumb-jump-go)))
 
-(defun +lookup-project-search-backend (identifier)
+(defun +lookup-project-search-backend-fn (identifier)
   "Conducts a simple project text search for IDENTIFIER.
 
 Uses and requires `+ivy-file-search' or `+helm-file-search'. Will return nil if
-neither is available. These search backends will use ag, rg, or pt (in an order
-dictated by `+ivy-project-search-engines' or `+helm-project-search-engines',
-falling back to git-grep)."
+neither is available. These require ripgrep to be installed."
   (unless identifier
     (let ((query (rxt-quote-pcre identifier)))
       (ignore-errors
         (cond ((featurep! :completion ivy)
-               (+ivy-file-search nil :query query)
+               (+ivy-file-search :query query)
                t)
               ((featurep! :completion helm)
-               (+helm-file-search nil :query query)
+               (+helm-file-search :query query)
                t))))))
 
-(defun +lookup-evil-goto-definition-backend (_identifier)
+(defun +lookup-evil-goto-definition-backend-fn (_identifier)
   "Uses `evil-goto-definition' to conduct a text search for IDENTIFIER in the
 current buffer."
   (and (fboundp 'evil-goto-definition)
@@ -297,22 +299,24 @@ Otherwise, falls back on `find-file-at-point'."
          (find-file-at-point path))
 
         ((not (+lookup--jump-to :file path))
-         (let ((fullpath (expand-file-name path)))
+         (let ((fullpath (doom-path path)))
            (when (and buffer-file-name (file-equal-p fullpath buffer-file-name))
              (user-error "Already here"))
            (let* ((insert-default-directory t)
                   (project-root (doom-project-root))
                   (ffap-file-finder
-                   (cond ((not (file-directory-p fullpath))
+                   (cond ((not (doom-glob fullpath))
                           #'find-file)
                          ((ignore-errors (file-in-directory-p fullpath project-root))
                           (lambda (dir)
-                            (let ((default-directory dir))
-                              (without-project-cache!
-                               (let ((file (projectile-completing-read "Find file: "
-                                                                       (projectile-current-project-files)
-                                                                       :initial-input path)))
-                                 (find-file (expand-file-name file (doom-project-root)))
-                                 (run-hooks 'projectile-find-file-hook))))))
+                            (let* ((default-directory dir)
+                                   projectile-project-name
+                                   projectile-project-root
+                                   (projectile-project-root-cache (make-hash-table :test 'equal))
+                                   (file (projectile-completing-read "Find file: "
+                                                                     (projectile-current-project-files)
+                                                                     :initial-input path)))
+                              (find-file (expand-file-name file (doom-project-root)))
+                              (run-hooks 'projectile-find-file-hook))))
                          (#'doom-project-browse))))
              (find-file-at-point path))))))

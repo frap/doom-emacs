@@ -11,18 +11,13 @@
 ;;
 ;;; Packages
 
-(def-package! ox-reveal
+(use-package! org-re-reveal
   :after ox
   :init
-  ;; Fix #1127, where ox-reveal adds an errant entry to
-  ;; `org-structure-template-alist'
-  (setq org-reveal-note-key-char nil)
-  :config
-  (setq org-reveal-root "https://cdn.jsdelivr.net/npm/reveal.js@3/"
-        org-reveal-mathjax t))
+  (setq org-re-reveal-root "https://cdn.jsdelivr.net/npm/reveal.js@3/"))
 
 
-(def-package! org-tree-slide
+(use-package! org-tree-slide
   :commands org-tree-slide-mode
   :config
   (org-tree-slide-simple-profile)
@@ -36,10 +31,24 @@
         :n [left]  #'org-tree-slide-move-previous-tree)
 
   (add-hook! 'org-tree-slide-mode-after-narrow-hook
-    #'(+org-present|detect-slide
-       +org-present|add-overlays
-       org-display-inline-images))
+             #'+org-present-detect-slide-h
+             #'+org-present-add-overlays-h
+             #'org-display-inline-images)
 
-  (add-hook 'org-tree-slide-mode-hook #'+org-present|init-org-tree-window)
-  (advice-add #'org-tree-slide--display-tree-with-narrow
-              :around #'+org-present*narrow-to-subtree))
+  (add-hook 'org-tree-slide-mode-hook #'+org-present-init-org-tree-window-h)
+
+  (defadvice! +org-present--narrow-to-subtree-a (orig-fn &rest args)
+    "Narrow to the target subtree when you start the presentation."
+    :around #'org-tree-slide--display-tree-with-narrow
+    (cl-letf (((symbol-function #'org-narrow-to-subtree)
+               (lambda () (save-excursion
+                            (save-match-data
+                              (org-with-limited-levels
+                               (narrow-to-region
+                                (progn (org-back-to-heading t)
+                                       (forward-line 1)
+                                       (point))
+                                (progn (org-end-of-subtree t t)
+                                       (when (and (org-at-heading-p) (not (eobp))) (backward-char 1))
+                                       (point)))))))))
+      (apply orig-fn args))))

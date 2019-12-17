@@ -9,8 +9,20 @@
 
   (set-popup-rule! "^\\*gist-" :ignore t)
 
-  (defun +gist*list-render (orig-fn &rest args)
+  (defadvice! +gist--open-in-popup-a (orig-fn &rest args)
+    :around #'gist-list-render
     (funcall orig-fn (car args) t)
     (unless (cadr args)
       (pop-to-buffer (current-buffer))))
-  (advice-add #'gist-list-render :around #'+gist*list-render))
+
+  (map! :map gist-list-menu-mode-map
+        :n "go"  #'gist-browse-current-url
+        :n "gr"  #'gist-list-reload
+        :n "c"   #'gist-add-buffer
+        :n "d"   #'gist-kill-current
+        :n "e"   #'gist-edit-current-description
+        :n "f"   #'gist-fork
+        :n "q"   #'kill-current-buffer
+        :n "s"   #'gist-star
+        :n "S"   #'gist-unstar
+        :n "y"   #'gist-print-current-url))

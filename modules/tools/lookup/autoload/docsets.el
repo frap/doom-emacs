@@ -51,7 +51,7 @@ Used by `+lookup/in-docsets' and `+lookup/documentation'."
           (add-hook hook fn 'append))))))
 
 ;;;###autoload
-(defun +lookup-dash-docsets-backend (identifier)
+(defun +lookup-dash-docsets-backend-fn (identifier)
   "Looks up IDENTIFIER in available Dash docsets, if any are installed.
 
 This backend is meant for `+lookup-documentation-functions'.
@@ -65,9 +65,10 @@ Docsets must be installed with one of the following commands:
 + `dash-docs-async-install-docset-from-file'
 
 Docsets can be searched directly via `+lookup/in-docsets'."
-  (when-let (docsets (cl-remove-if-not #'dash-docs-docset-path (dash-docs-buffer-local-docsets)))
-    (+lookup/in-docsets nil identifier docsets)
-    'deferred))
+  (when (require 'dash-docs nil t)
+    (when-let (docsets (cl-remove-if-not #'dash-docs-docset-path (dash-docs-buffer-local-docsets)))
+      (+lookup/in-docsets nil identifier docsets)
+      'deferred)))
 
 
 ;;

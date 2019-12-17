@@ -1,7 +1,7 @@
 ;;; lang/java/+meghanada.el -*- lexical-binding: t; -*-
 ;;;###if (featurep! +meghanada)
 
-(def-package! meghanada
+(use-package! meghanada
   :hook (java-mode . meghanada-mode)
   :init
   (setq meghanada-server-install-dir (concat doom-etc-dir "meghanada-server/")
@@ -16,14 +16,14 @@
 
   (map! :localleader
         :map java-mode-map
-        (:prefix "r"
+        (:prefix ("r" . "refactor")
           "ia" #'meghanada-import-all
           "io" #'meghanada-optimize-import
           "l"  #'meghanada-local-variable
           "f"  #'meghanada-code-beautify)
-        (:prefix "h"
+        (:prefix ("h" . "help")
           "r"  #'meghanada-reference
           "t"  #'meghanada-typeinfo)
-        (:prefix "b"
+        (:prefix ("b" . "build")
           "f"  #'meghanada-compile-file
           "p"  #'meghanada-compile-project)))

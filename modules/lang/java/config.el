@@ -17,6 +17,9 @@ If the depth is 1, the first directory in src/java/net/lissner/game/MyClass.java
   is removed: java.net.lissner.game.
 If the depth is 2, the first two directories are removed: net.lissner.game.")
 
+(after! projectile
+  (pushnew! projectile-project-root-files "gradlew" "build.gradle"))
+
 
 ;;
 ;; java-mode
@@ -30,16 +33,16 @@ If the depth is 2, the first two directories are removed: net.lissner.game.")
 ;;
 ;; Common packages
 
-(def-package! android-mode
+(use-package! android-mode
   :commands android-mode
   :init
-  (add-hook! (java-mode groovy-mode nxml-mode) #'+java|android-mode-maybe)
+  (add-hook! '(java-mode-hook groovy-mode-hook nxml-mode-hook)
+             #'+java-android-mode-maybe-h)
   :config
   (set-yas-minor-mode! 'android-mode))
 
 
-(def-package! groovy-mode
+(use-package! groovy-mode
   :mode "\\.g\\(?:radle\\|roovy\\)$"
   :config
   (set-eval-handler! 'groovy-mode "groovy"))
-

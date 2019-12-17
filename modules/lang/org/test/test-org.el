@@ -18,34 +18,22 @@
       (kill-buffer (get-buffer "org")))
 
     (describe "headlines"
-      (it "appends first-level headlines with an extra newline"
-        (insert! "* {0}Header")
+      (it "opens new headline below"
+        (insert!! "* {0}Header")
         (+org/insert-item-below 1)
         (expect (eobp))
         (expect (buffer-substring-no-properties (point-min) (point-max))
-                :to-equal "* Header\n\n* "))
-      (it "prepends first-level headlines with an extra newline"
-        (insert! "* {0}Header")
-        (+org/insert-item-above 1)
-        (expect (eolp))
-        (expect (buffer-substring-no-properties (point-min) (point-max))
-                :to-equal "* \n\n* Header"))
+                :to-equal "* Header\n* "))
 
-      (it "appends second-level headlines with an no extra newline"
-        (insert! "** {0}Header")
-        (+org/insert-item-below 1)
-        (expect (eobp))
-        (expect (buffer-substring-no-properties (point-min) (point-max))
-                :to-equal "** Header\n** "))
-      (it "prepends second-level headlines with an no extra newline"
-        (insert! "** {0}Header")
+      (it "opens new headline above"
+        (insert!! "* {0}Header")
         (+org/insert-item-above 1)
         (expect (eolp))
         (expect (buffer-substring-no-properties (point-min) (point-max))
-                :to-equal "** \n** Header"))
+                :to-equal "* \n* Header"))
 
       (it "appends headlines, skipping subtrees"
-        (insert! "** {0}First\n"
+        (insert!! "** {0}First\n"
                  "*** sub 1\n"
                  "*** sub 2\n"
                  "**** subsub 1\n"
@@ -63,7 +51,7 @@
                                "** Header")
                              "\n")))
       (it "prepends headlines, skipping subtrees"
-        (insert! "** First\n"
+        (insert!! "** First\n"
                  "*** sub 1\n"
                  "*** sub 2\n"
                  "**** {0}subsub 1\n"
@@ -83,18 +71,18 @@
 
     (describe "plain lists"
       (it "appends items"
-        (insert! "+ {0}List item")
+        (insert!! "+ {0}List item")
         (+org/insert-item-below 1)
         (expect (buffer-substring-no-properties (point-min) (point-max))
                 :to-equal "+ List item\n+ "))
       (it "prepends items"
-        (insert! "+ {0}List item")
+        (insert!! "+ {0}List item")
         (+org/insert-item-above 1)
         (expect (buffer-substring-no-properties (point-min) (point-max))
                 :to-equal "+ \n+ List item"))
 
       (it "appends items, but skips over child items"
-        (insert! "+ {0}List item\n"
+        (insert!! "+ {0}List item\n"
                  "  + Sub item\n"
                  "+ List item")
         (+org/insert-item-below 1)
@@ -106,7 +94,7 @@
                                "+ List item")
                              "\n")))
       (it "prepends items, but skips over child items"
-        (insert! "+ List item\n"
+        (insert!! "+ List item\n"
                  "  + Sub item\n"
                  "+ {0}List item")
         (+org/insert-item-above 1)
@@ -120,7 +108,7 @@
 
     (describe "numbered lists"
       (it "appends items and updates numbers"
-        (insert! "1. {0}List item\n"
+        (insert!! "1. {0}List item\n"
                  "2. Sub item\n"
                  "3. List item")
         (+org/insert-item-below 1)
@@ -132,7 +120,7 @@
                                "4. List item")
                              "\n")))
       (it "prepends items and updates numbers"
-        (insert! "1. List item\n"
+        (insert!! "1. List item\n"
                  "2. Sub item\n"
                  "3. {0}List item")
         (+org/insert-item-above 1)

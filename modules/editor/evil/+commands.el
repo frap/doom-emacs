@@ -1,103 +1,10 @@
 ;;; editor/evil/+commands.el -*- lexical-binding: t; -*-
 
-(evil-define-operator +evil:open-scratch-buffer (bang)
-  (interactive "<!>")
-  (doom/open-scratch-buffer bang))
-
-(evil-define-command +evil:pwd (bang)
-  "Display the current working directory. If BANG, copy it to your clipboard."
-  (interactive "<!>")
-  (if (not bang)
-      (pwd)
-    (kill-new default-directory)
-    (message "Copied to clipboard")))
-
-(evil-define-command +evil:make (arguments &optional bang)
-  "Run make with ARGUMENTS.
-If BANG is non-nil, open compilation output in a comint buffer.
-
-If BANG, then run ARGUMENTS as a full command. This command understands vim file
-modifiers (like %:p:h). See `+evil*resolve-vim-path' for details."
-  (interactive "<sh><!>")
-  (+evil:compile (format "make %s"
-                        (evil-ex-replace-special-filenames
-                         arguments))
-                bang))
-
-(evil-define-command +evil:compile (arguments &optional bang)
-  "Run `compile-command' with ARGUMENTS.
-If BANG is non-nil, open compilation output in a comint buffer.
-
-This command understands vim file modifiers (like %:p:h). See
-`+evil*resolve-vim-path' for details."
-  (interactive "<sh><!>")
-  (compile (evil-ex-replace-special-filenames
-            (format "%s %s"
-                    (eval compile-command)
-                    arguments))
-           bang))
-
-(evil-define-command +evil:reverse-lines (beg end)
-  "Reverse lines between BEG and END."
-  (interactive "<r>")
-  (reverse-region beg end))
-
-(evil-define-command +evil:cd (&optional path)
-  "Change `default-directory' with `cd'."
-  (interactive "<f>")
-  (let ((path (or path "~")))
-    (cd path)
-    (message "Changed directory to '%s'" (abbreviate-file-name (expand-file-name path)))))
-
-(evil-define-command +evil:kill-all-buffers (&optional bang)
-  "Kill all buffers. If BANG, kill current session too."
-  (interactive "<!>")
-  (if (and bang (fboundp '+workspace/kill-session))
-      (+workspace/kill-session)
-    (doom/kill-all-buffers)))
-
-(evil-define-command +evil:kill-matching-buffers (&optional bang pattern)
-  "Kill all buffers matching PATTERN regexp. If BANG, only match project
-buffers."
-  (interactive "<a>")
-  (doom/kill-matching-buffers pattern bang))
-
-(evil-define-command +evil:help (&optional bang query)
-  "Look up help documentation for QUERY in Emacs documentation.
-
-If BANG, search Doom documentation."
-  (interactive "<!><a>")
-  (if bang
-      (doom/help-search query)
-    (cond ((or (null query) (string-empty-p (string-trim query)))
-           (call-interactively
-            (or (command-remapping #'apropos)
-                #'apropos)))
-          ((string-match-p "^ *:[a-z]" query)
-           (let* ((modules
-                   (cl-loop for path in (doom-module-load-path 'all)
-                            for (cat . mod) = (doom-module-from-path path)
-                            for format = (format "%s %s" cat mod)
-                            if (doom-module-p cat mod)
-                            collect (propertize format 'module (list cat mod))
-                            else if (and cat mod)
-                            collect (propertize format
-                                                'face 'font-lock-comment-face
-                                                'module (list cat mod))))
-                  (module (completing-read "Describe module: " modules nil t query))
-                  (key (get-text-property 0 'module module)))
-             (doom/help-modules key)))
-          ((and (string-match-p "\\(?:SPC\\|[CMsSH]-[^ ]\\|<[^>]+>\\)" query)
-                (helpful-key (kbd (string-trim query)))))
-          ((apropos query t)))))
-
-
 ;;
-;; Commands
-
 ;;; Custom commands
 ;; Editing
 (evil-ex-define-cmd "@"            #'+evil:macro-on-all-lines)   ; TODO Test me
+(evil-ex-define-cmd "R[ead]"       #'+evil:read)
 (evil-ex-define-cmd "al[ign]"      #'+evil:align)
 (evil-ex-define-cmd "ral[ign]"     #'+evil:align-right)
 (evil-ex-define-cmd "enhtml"       #'+web:encode-html-entities)
@@ -107,6 +14,7 @@ If BANG, search Doom documentation."
 (evil-ex-define-cmd "na[rrow]"     #'+evil:narrow-buffer)
 (evil-ex-define-cmd "retab"        #'+evil:retab)
 (evil-ex-define-cmd "rev[erse]"    #'+evil:reverse-lines)
+(evil-ex-define-cmd "l[ine]diff"   #'evil-quick-diff)
 
 ;;; External resources
 ;; TODO (evil-ex-define-cmd "db"          #'doom:db)
@@ -142,7 +50,7 @@ If BANG, search Doom documentation."
 (evil-ex-define-cmd "k[ill]o"     #'doom/kill-other-buffers)
 (evil-ex-define-cmd "k[ill]b"     #'doom/kill-buried-buffers)
 (evil-ex-define-cmd "l[ast]"      #'doom/popup-restore)
-(evil-ex-define-cmd "m[sg]"       #'view-echo-area-messages)
+(evil-ex-define-cmd "messages"    #'view-echo-area-messages)
 (evil-ex-define-cmd "pop[up]"     #'doom/popup-this-buffer)
 
 ;;; Project navigation
@@ -150,29 +58,19 @@ If BANG, search Doom documentation."
 (evil-ex-define-cmd "cd"          #'+evil:cd)
 (evil-ex-define-cmd "pwd"         #'+evil:pwd)
 
+(evil-define-command +evil:swiper (&optional search)
+  "Invoke `swiper' with SEARCH, otherwise with the symbol at point."
+  (interactive "<a>")
+  (swiper-isearch search))
+(evil-ex-define-cmd "sw[iper]" #'+evil:swiper)
+
 (cond ((featurep! :completion ivy)
-       (evil-ex-define-cmd "ag"        #'+ivy:ag)
-       (evil-ex-define-cmd "agc[wd]"   #'+ivy:ag-from-cwd)
-       (evil-ex-define-cmd "rg"        #'+ivy:rg)
-       (evil-ex-define-cmd "rgc[wd]"   #'+ivy:rg-from-cwd)
-       (evil-ex-define-cmd "pt"        #'+ivy:pt)
-       (evil-ex-define-cmd "ptc[wd]"   #'+ivy:pt-from-cwd)
-       (evil-ex-define-cmd "grep"      #'+ivy:grep)
-       (evil-ex-define-cmd "grepc[wd]" #'+ivy:grep-from-cwd)
-       (evil-ex-define-cmd "sw[iper]"  #'+ivy:swiper)
-       (evil-ex-define-cmd "todo"      #'+ivy:todo))
+       (evil-ex-define-cmd "pg[rep]"   #'+ivy:project-search)
+       (evil-ex-define-cmd "pg[grep]d" #'+ivy:project-search-from-cwd))
 
       ((featurep! :completion helm)
-       (evil-ex-define-cmd "ag"        #'+helm:ag)
-       (evil-ex-define-cmd "agc[wd]"   #'+helm:ag-from-cwd)
-       (evil-ex-define-cmd "rg"        #'+helm:rg)
-       (evil-ex-define-cmd "rgc[wd]"   #'+helm:rg-from-cwd)
-       (evil-ex-define-cmd "pt"        #'+helm:pt)
-       (evil-ex-define-cmd "ptc[wd]"   #'+helm:pt-from-cwd)
-       (evil-ex-define-cmd "grep"      #'+helm:grep)
-       (evil-ex-define-cmd "grepc[wd]" #'+helm:grep-from-cwd)
-       ;; (evil-ex-define-cmd "todo"     #'+helm:todo) TODO implement `+helm:todo'
-       ))
+       (evil-ex-define-cmd "pg[rep]"   #'+helm:project-search)
+       (evil-ex-define-cmd "pg[grep]d" #'+helm:project-search-from-cwd)))
 
 ;;; Project tools
 (evil-ex-define-cmd "compile"     #'+evil:compile)

@@ -1,8 +1,5 @@
 ;;; lang/elm/config.el -*- lexical-binding: t; -*-
 
-;; `elm-mode'
-(setq elm-format-on-save t)
-
 (after! elm-mode
   (add-hook 'elm-mode-hook #'rainbow-delimiters-mode)
 
@@ -19,7 +16,7 @@
     :and "&&" :or "||"))
 
 
-(def-package! flycheck-elm
+(use-package! flycheck-elm
   :when (featurep! :tools flycheck)
   :after elm-mode
   :config (add-to-list 'flycheck-checkers 'elm nil #'eq))
